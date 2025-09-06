@@ -1,0 +1,18 @@
+# Web framework and server
+fastapi>=0.104.0
+uvicorn>=0.24.0
+python-multipart>=0.0.6
+
+# Video and audio processing
+yt-dlp>=2023.12.0
+faster-whisper>=0.10.0
+
+# LLM and text processing
+llama-cpp-python>=0.2.0
+pyenchant>=3.2.0
+
+# HTTP client
+requests>=2.31.0
+
+# System monitoring
+psutil>=5.9.0
