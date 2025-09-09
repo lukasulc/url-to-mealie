@@ -24,6 +24,32 @@ services:
     networks:
       - llm-network
 
+  # TODO: Figure out how to choose between local build and prebuilt image
+  # Uncomment to build the LLM server locally (e.g. for ARM64)
+  # llm:
+  #   build: ./llama.cpp
+  #   image: local-llm-arm64
+  #   ports:
+  #     - "6998:6998"
+  #   volumes:
+  #     - ./models:/app/models:ro
+  #     - llm_logs:/var/log
+  #   env_file: .env
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         memory: 2.5G
+  #       reservations:
+  #         memory: 1.5G
+  #   restart: unless-stopped
+  #   logging:
+  #     driver: "json-file"
+  #     options:
+  #       max-size: "10m"
+  #       max-file: "3"
+  #   networks:
+  #     - llm-network
+
   url-to-mealie:
     build: ./url-to-mealie
     image: url-to-mealie
