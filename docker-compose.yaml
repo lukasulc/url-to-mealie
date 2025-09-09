@@ -1,6 +1,32 @@
 services:
+  llm:
+    #   image: ghcr.io/ggml-org/llama.cpp:server
+    image: amperecomputingai/llama.cpp:latest
+    # command: ./llama-server
+    ports:
+      - "6998:6998"
+    volumes:
+      - ./models:/app/models
+      - llm_logs:/var/log
+    env_file: .env
+    deploy:
+      resources:
+        limits:
+          memory: 2.5G
+        reservations:
+          memory: 1.5G
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - llm-network
+
   url-to-mealie:
     build: ./url-to-mealie
+    image: url-to-mealie
     ports:
       - "8999:6999"
     volumes:
@@ -11,8 +37,12 @@ services:
       - MEALIE_TOKEN=${MEALIE_API_KEY}
       - MEALIE_BASE_URL=${MEALIE_BASE_URL}
       - LOG_LEVEL=${LOG_LEVEL}
-    restart: always
+      - LLM_SERVER_URL=http://llm:6998
+    restart: unless-stopped
+    depends_on:
+      - llm
     networks:
+      - llm-network
       - mealie_default
     deploy:
       resources:
@@ -20,7 +50,6 @@ services:
           memory: 2.5G
         reservations:
           memory: 1.5G
-    mem_swappiness: 80
     # healthcheck:
     #   test: ["CMD", "curl", "-f", "http://localhost:6999/health"]
     #   interval: 30s
@@ -35,6 +64,10 @@ services:
 
 volumes:
   recipe_logs:
+  llm_logs:
+
 networks:
+  llm-network:
+    driver: bridge
   mealie_default:
     external: true

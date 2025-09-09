@@ -8,8 +8,6 @@ from ai.recipe_parser import (
     naive_parse,
     smart_parse,
     create_prompt,
-    get_llm,
-    MODEL_PATH,
 )
 from logger import get_configured_logger
 from validators.config_validator import validate_mealie_config
@@ -28,6 +26,7 @@ app_state = {
 }
 
 MEALIE_BASE_URL = os.getenv("MEALIE_BASE_URL", "").rstrip("/")
+MEALIE_STATIC_URL = os.getenv("MEALIE_STATIC_URL", MEALIE_BASE_URL).rstrip("/")
 MEALIE_TOKEN = os.getenv("MEALIE_TOKEN")
 MEALIE_URL = f"{MEALIE_BASE_URL}/api/recipes" if MEALIE_BASE_URL else ""
 
@@ -175,30 +174,30 @@ def get_memory_usage():
     }
 
 
-@app.get("/health")
-async def health_check():
-    """Health check endpoint for Docker and monitoring."""
-    if not os.path.exists(MODEL_PATH):
-        return JSONResponse(
-            status_code=503,
-            content={
-                "status": "error",
-                "message": "Model file not found",
-                "details": {"path": str(MODEL_PATH)},
-            },
-        )
+# @app.get("/health")
+# async def health_check():
+#     """Health check endpoint for Docker and monitoring."""
+#     if not os.path.exists(MODEL_PATH):
+#         return JSONResponse(
+#             status_code=503,
+#             content={
+#                 "status": "error",
+#                 "message": "Model file not found",
+#                 "details": {"path": str(MODEL_PATH)},
+#             },
+#         )
 
-    memory = get_memory_usage()
-    status = "healthy" if memory["percent"] < 90 else "warning"
+#     memory = get_memory_usage()
+#     status = "healthy" if memory["percent"] < 90 else "warning"
 
-    return {
-        "status": status,
-        "uptime": str(datetime.now() - app_state["startup_time"]),
-        "recipes_processed": app_state["recipes_processed"],
-        "last_error": app_state["last_error"],
-        "model": {"path": str(MODEL_PATH), "loaded": app_state["model_loaded"]},
-        "memory": memory,
-    }
+#     return {
+#         "status": status,
+#         "uptime": str(datetime.now() - app_state["startup_time"]),
+#         "recipes_processed": app_state["recipes_processed"],
+#         "last_error": app_state["last_error"],
+#         "model": {"path": str(MODEL_PATH), "loaded": app_state["model_loaded"]},
+#         "memory": memory,
+#     }
 
 
 @app.on_event("startup")
@@ -206,20 +205,6 @@ async def startup_event():
     """Initialize application state and verify dependencies."""
     logger.info("Starting Recipe Parser application")
     app_state["startup_time"] = datetime.now()
-
-    if not os.path.exists(MODEL_PATH):
-        logger.error(f"Model file not found at {MODEL_PATH}")
-        raise RuntimeError(f"Model file not found at {MODEL_PATH}")
-
-    # Pre-warm the model
-    try:
-        get_llm()
-        app_state["model_loaded"] = True
-        logger.info("LLM model loaded successfully")
-    except Exception as e:
-        logger.error(f"Error loading LLM model: {e}")
-        app_state["last_error"] = str(e)
-        raise
 
 
 @app.on_event("shutdown")
@@ -323,7 +308,7 @@ def submit(
         app_state["recipes_processed"] += 1
         app_state["last_error"] = None
 
-        recipe_url = f"{MEALIE_BASE_URL}/g/home/r/{result}"
+        recipe_url = f"{MEALIE_STATIC_URL}/g/home/r/{result}"
         return f"<p>✅ Recipe added! <a href='{recipe_url}'>View in Mealie</a></p>"
 
     except subprocess.CalledProcessError as e:

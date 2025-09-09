@@ -1,0 +1,48 @@
+{
+  "title": "Recipe",
+  "type": "object",
+  "properties": {
+    "name": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "recipeIngredient": {
+      "type": ["array", "null"],
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "quantity": { "type": ["number", "null"], "minimum": 0 },
+          "unit": { "type": ["string", "null"] },
+          "note": { "type": ["string", "null"] },
+          "display": { "type": "string" },
+          "title": { "type": ["string", "null"] }
+        },
+        "required": ["quantity", "unit", "display"],
+        "additionalProperties": false
+      }
+    },
+    "recipeInstructions": {
+      "type": ["array", "null"],
+      "items": {
+        "type": "object",
+        "properties": {
+          "title": { "type": ["string", "null"] },
+          "summary": { "type": ["string", "null"] },
+          "text": { "type": "string", "minLength": 1 }
+        },
+        "required": ["text"],
+        "additionalProperties": false
+      },
+      "minItems": 1
+    },
+    "totalTime": { "type": ["string", "null"] },
+    "nutrition": {
+      "type": ["object", "null"],
+      "properties": {
+        "calories": { "type": ["string", "null"] },
+        "fatContent": { "type": ["string", "null"] }
+      }
+    }
+  },
+  "required": ["name", "recipeIngredients"],
+  "additionalProperties": false
+}

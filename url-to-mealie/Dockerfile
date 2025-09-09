@@ -8,37 +8,22 @@ ENV PYTHONPATH="/app/src:${PYTHONPATH}"
 RUN apt-get update && \
     apt-get install -y \
         ffmpeg \
-        wget \
         curl \
-        build-essential \
-        cmake \
-        gcc \
-        g++ \
-        python3-dev \
-        enchant-2 \
-        libenchant-2-dev && \
+        enchant-2 && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies with optimizations
-# ENV CMAKE_ARGS="-DGGML_CUDA=on -DLLAMA_CUBLAS=on -DCMAKE_CUDA_ARCHITECTURES=all-major"
-# ENV FORCE_CMAKE=1
-ENV CMAKE_ARGS="-DLLAMA_BLAS=ON -DLLAMA_BLAS_VENDOR=OpenBLAS -DLLAMA_CUBLAS=OFF"
+# Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Create necessary directories
-RUN mkdir -p /app/models /var/log && \
+RUN mkdir -p /var/log && \
     touch /var/log/url-to-mealie.log && \
     chmod 666 /var/log/url-to-mealie.log
 
-# Download parsing model
-RUN wget -q https://huggingface.co/unsloth/gemma-3-1b-it-GGUF/resolve/main/gemma-3-1b-it-BF16.gguf \
-    -O /app/models/parsing_model.gguf
+# Models will be mounted from host
 
 # Copy application code
 COPY . .
-
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:6999/health || exit 1
 
 CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "6999"]

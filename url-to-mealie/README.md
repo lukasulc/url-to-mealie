@@ -4,71 +4,68 @@ This application extracts recipe information from Social Media videos using audi
 
 ## Setup Instructions
 
-1. Install Python dependencies:
+1. Install Python dependencies
 
    ```bash
    pip install -r requirements.txt
    ```
 
-2. Download the LLM model:
+2. Project architecture and models
 
-   - Visit [TheBloke/Gemma-3b-it-GGUF](https://huggingface.co/TheBloke/Gemma-3b-it-GGUF)
-   - Download the `gemma-3b-it-q4_k_m.gguf` file
-   - Place the downloaded file in the `models` directory inside the `url-to-mealie` folder
-   - The final path should be: `url-to-mealie/models/parsing_model.gguf`
+   The LLM is now provided as a separate service (llama.cpp server). This repository contains two main services:
 
-3. Set up environment variables:
+   - `llm` (optional): builds and runs the llama.cpp HTTP server (see `./llama.cpp`)
+   - `url-to-mealie`: the recipe parser web app (this folder)
 
-   Required:
+   Models should live in the top-level `models/` directory (shared volume).
+
+   The `llm` service mounts `./models` into the container at `/app/models` (read-only). Update `docker-compose.yaml` if you want a different path or filename.
+
+3. Environment variables
+
+   Required (for the parser):
 
    - `MEALIE_BASE_URL`: Your Mealie instance URL (e.g., "http://localhost:9000")
    - `MEALIE_TOKEN`: Your Mealie API token
 
-   Optional:
+   Parser-specific optional:
 
-   - `MODEL_DIR`: Override the default models directory path
+   - `LLM_SERVER_URL`: URL of the llama.cpp HTTP server (default: `http://llm:6998` when using docker-compose)
 
-4. Run the application:
+   LLM service (if you run it via `docker-compose`):
 
-   Using Python directly:
+   - `PORT` (default `6998`)
+   - `MODEL_PATH` (set in `docker-compose.yaml` environment or point to the model file inside `/app/models`)
 
-   ```bash
-   cd src
-   python main.py
-   ```
+4. Running the project with Docker (recommended)
 
-   Or using Docker:
+   The repository includes a `docker-compose.yaml` which defines two services: `llm` and `url-to-mealie`.
+
+   - If you want the stack fully self-contained, leave `llm` enabled. It will build the server from `./llama.cpp` and serve the model from the shared `models/` volume.
+   - If you already run a llama.cpp server elsewhere, you can comment out or remove the `llm` service and set `LLM_SERVER_URL` in the parser `.env` (or export it) to point to your existing server.
+
+   Example: bring up both services locally
 
    ```bash
    docker-compose up --build
    ```
 
-## Model Options
+   Example: use your own LLM server and only run the parser
 
-The application uses Gemma 3B for recipe parsing. You can use different GGUF model variants based on your needs:
-
-- `gemma-3b-it-q4_k_m.gguf`: Good balance of size and quality (default)
-- `gemma-3b-it-q3_k_m.gguf`: Smaller size, slightly lower quality
-- `gemma-3b-it-q5_k_m.gguf`: Larger size, slightly better quality
-
-The model should be renamed to `parsing_model.gguf` when placed in the models directory.
-
-GPU Acceleration (Work in Progress):
-
-- GPU acceleration with CUDA is being implemented
-- The application attempts to use GPU layers if available
-- Current GPU support is experimental
-- You can monitor GPU usage attempts in the application logs
+   ```bash
+   # comment out llm service in docker-compose.yaml
+   export LLM_SERVER_URL=http://your-llm-host:6998
+   docker-compose up --build url-to-mealie
+   ```
 
 ## Features
 
 - Transcribes audio from Social Media videos using Whisper
-- Extracts recipe information using Gemma 2B
+- Extracts recipe information using an external LLM service (llama.cpp)
 - Parses ingredients, instructions, and metadata
 - Integrates with Mealie recipe manager including thumbnails
 - Preserves original video URL and caption
 - Includes spell checking and validation
-- Supports GPU acceleration for faster processing
 - Fallback to basic parsing if LLM fails
 - Health monitoring and memory usage tracking
 - Docker support for easy deployment
