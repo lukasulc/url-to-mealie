@@ -1,19 +1,24 @@
-from fastapi import FastAPI, Form, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.exceptions import RequestValidationError
-from fastapi.requests import Request
-import subprocess, requests, os, json
+import json
+import os
+import subprocess
 from datetime import datetime
-from ai.recipe_parser import (
-    naive_parse,
-    smart_parse,
-    create_prompt,
-)
-from logger import get_configured_logger
-from validators.config_validator import validate_mealie_config
-from ai.audio_processing import download_audio, transcribe_audio
 from typing import Annotated
 
+import requests
+from ai.audio_processing import download_audio, transcribe_audio
+from ai.recipe_parser import create_prompt, naive_parse, smart_parse
+from fastapi import FastAPI, Form, HTTPException
+from fastapi.exceptions import RequestValidationError
+from fastapi.requests import Request
+from fastapi.responses import HTMLResponse
+from logger import get_configured_logger
+from templates.templates import (
+    get_error_page,
+    get_exception_page,
+    get_homepage,
+    get_success_page,
+)
+from validators.config_validator import validate_mealie_config
 
 app = FastAPI(title="Recipe Parser API")
 logger = get_configured_logger(__name__)
@@ -128,76 +133,10 @@ def set_recipe_thumbnail(slug: str, thumbnail_url: str):
 
 @app.get("/", response_class=HTMLResponse)
 def form():
-    mealie_status = (
-        "✅ Connected" if MEALIE_TOKEN and MEALIE_BASE_URL else "❌ Not configured"
+    return get_homepage(
+        MEALIE_URL,
+        MEALIE_TOKEN,
     )
-    return f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <style>
-            body {{ font-family: Arial, sans-serif; margin: 20px; }}
-            .status {{ margin-bottom: 20px; }}
-            .error {{ color: red; }}
-            .success {{ color: green; }}
-        </style>
-    </head>
-    <body>
-        <h1>Recipe Parser</h1>
-        <div class="status">
-            <p>Mealie Status: <span class="{'success' if MEALIE_TOKEN and MEALIE_BASE_URL else 'error'}">{mealie_status}</span></p>
-            <p>Mealie URL: {MEALIE_BASE_URL}</p>
-        </div>
-        <form action="/submit" method="post">
-            <input name="url" 
-                placeholder="Paste Social Media video URL (e.g., https://tiktok.com)" 
-                style="width:80%"
-                type="url"
-                required/>
-            <button type="submit">Submit</button>
-        </form>
-    </body>
-    </html>
-    """
-
-
-def get_memory_usage():
-    """Get current memory usage of the process"""
-    import psutil
-
-    process = psutil.Process()
-    memory_info = process.memory_info()
-    return {
-        "rss": memory_info.rss / 1024 / 1024,
-        "vms": memory_info.vms / 1024 / 1024,
-        "percent": process.memory_percent(),
-    }
-
-
-# @app.get("/health")
-# async def health_check():
-#     """Health check endpoint for Docker and monitoring."""
-#     if not os.path.exists(MODEL_PATH):
-#         return JSONResponse(
-#             status_code=503,
-#             content={
-#                 "status": "error",
-#                 "message": "Model file not found",
-#                 "details": {"path": str(MODEL_PATH)},
-#             },
-#         )
-
-#     memory = get_memory_usage()
-#     status = "healthy" if memory["percent"] < 90 else "warning"
-
-#     return {
-#         "status": status,
-#         "uptime": str(datetime.now() - app_state["startup_time"]),
-#         "recipes_processed": app_state["recipes_processed"],
-#         "last_error": app_state["last_error"],
-#         "model": {"path": str(MODEL_PATH), "loaded": app_state["model_loaded"]},
-#         "memory": memory,
-#     }
 
 
 @app.on_event("startup")
@@ -220,34 +159,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     for err in errors:
         if "url" in err.get("loc", []):
             messages.append(err["msg"])
-
-    error_html = f"""
-    <html>
-    <head>
-        <title>Validation Error</title>
-        <style>
-            body {{ font-family: Arial, sans-serif; margin: 40px; background: #f9f9f9; }}
-            .container {{ max-width: 480px; margin: auto; background: white; padding: 24px; border-radius: 8px; 
-                          box-shadow: 0 2px 12px rgba(0,0,0,0.15); }}
-            h1 {{ color: #d9534f; }}
-            ul {{ color: #d9534f; }}
-            li {{ margin-bottom: 10px; }}
-            a {{ text-decoration: none; color: #337ab7; }}
-            a:hover {{ text-decoration: underline; }}
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <h1>Validation Error</h1>
-            <p>The following errors occurred with your submission:</p>
-            <ul>
-                {''.join(f'<li>{message}</li>' for message in messages)}
-            </ul>
-            <a href="javascript:history.back()">Go Back</a>
-        </div>
-    </body>
-    </html>
-    """
+    error_html = f"<div>• {get_exception_page('</div><div>• '.join(messages))}</div>"
     return HTMLResponse(content=error_html, status_code=422)
 
 
@@ -294,7 +206,7 @@ def submit(
         logger.debug("Sending recipe to Mealie")
         recipe["orgURL"] = url
         recipe["description"] = (
-            recipe.get("description", "") + f"\n\n**[ORIGINAL CAPTION]**\n{caption}"
+            recipe.get("description", "") + f"**[ORIGINAL CAPTION]**{caption}"
         )
         result = send_recipe_to_mealie(recipe)
 
@@ -309,11 +221,15 @@ def submit(
         app_state["last_error"] = None
 
         recipe_url = f"{MEALIE_STATIC_URL}/g/home/r/{result}"
-        return f"<p>✅ Recipe added! <a href='{recipe_url}'>View in Mealie</a></p>"
+
+        return get_success_page(recipe_url, recipe.get("name", "Recipe"), app_state)
 
     except subprocess.CalledProcessError as e:
-        print(f"Command '{e.cmd}' failed with exit code {e.returncode}.")
-        print(f"Error output: {e.stderr.decode()}")
+        error_msg = (
+            f"Failed to download video: {e.stderr.decode() if e.stderr else str(e)}"
+        )
+        logger.error(error_msg)
+        return get_error_page(error_msg, url)
 
     except Exception as e:
         logger.error(f"Error processing recipe: {str(e)}", exc_info=True)
@@ -322,7 +238,7 @@ def submit(
             "error": str(e),
             "url": url,
         }
-        return f"<p>❌ Error: {e}</p>"
+        return get_error_page(str(e), url)
 
 
 def main():
