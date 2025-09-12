@@ -339,3 +339,53 @@ def get_error_page(error_message: str, url: str) -> str:
     </body>
     </html>
     """
+
+
+def get_instagram_error(errors: str, suggestions: str = None) -> str:
+    return f"""
+    <!DOCTYPE html>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Instagram Error - URL to Mealie</title>
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+        <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+        <style>
+            body {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; }}
+            .success-card {{ background: white; border-radius: 1rem; box-shadow: 0 1rem 3rem rgba(0,0,0,.1); }}
+        </style>
+    </head>
+    <html lang="en">
+        <div class="container my-4">
+            <div class="row justify-content-center">
+                <div class="col-md-7">
+                    <div class="card shadow-sm">
+                        <div class="card-body">
+                        <div class="text-center mb-3">
+                            <i class="fab fa-instagram text-danger fs-1"></i>
+                        </div>
+                        <h5 class="card-title text-center">Instagram error </h5>
+                        <p class="text-muted text-center">That pesky Instagram API is acting up.</p>
+                        <div class="alert alert-warning">
+                            <strong>Errors:</strong>
+                            <ul class="mb-0">
+                            {errors}
+                            </ul>
+                        </div>
+                        <div class="alert alert-warning">
+                            <strong>What you can do:</strong>
+                            <ul class="mb-0">
+                            {suggestions}
+                            </ul>
+                        </div>
+                        <div class="d-grid gap-2 d-md-flex justify-content-md-center">
+                            <a href="/" class="btn btn-outline-primary btn-lg">
+                                <i class="fas fa-plus me-2"></i>Wait and/or Try Another Recipe
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </html>
+    """

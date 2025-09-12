@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Annotated
 
 import requests
-from ai.audio_processing import download_audio, transcribe_audio
+from ai.audio_processing import download_audio, fetch_metadata, transcribe_audio
 from ai.recipe_parser import create_prompt, naive_parse, smart_parse
 from fastapi import FastAPI, Form, HTTPException
 from fastapi.exceptions import RequestValidationError
@@ -16,6 +16,7 @@ from templates.templates import (
     get_error_page,
     get_exception_page,
     get_homepage,
+    get_instagram_error,
     get_success_page,
 )
 from validators.config_validator import validate_mealie_config
@@ -36,15 +37,7 @@ MEALIE_TOKEN = os.getenv("MEALIE_TOKEN")
 MEALIE_URL = f"{MEALIE_BASE_URL}/api/recipes" if MEALIE_BASE_URL else ""
 
 
-def fetch_metadata(url: str) -> dict:
-    """Download metadata from Social Media video."""
-    result = subprocess.run(
-        ["yt-dlp", "-j", url], capture_output=True, text=True, check=True
-    )
-    return json.loads(result.stdout)
-
-
-def fetch_thumbnail(metadata: dict) -> str:
+def get_thumbnail(metadata: dict) -> str:
     """Get thumbnail from video metadata."""
     thumbnail_url = metadata.get("thumbnail")
     if not thumbnail_url:
@@ -163,6 +156,17 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     return HTMLResponse(content=error_html, status_code=422)
 
 
+def _normalize_ig_url(url: str) -> str:
+    # Resolve share shortlinks and redirect to canonical reel/post URLs
+    try:
+        r = requests.get(url, allow_redirects=True, timeout=10)
+        final = r.url or url
+    except Exception:
+        final = url
+    # Ensure we pass canonical “/reel/” or “/p/” etc. to yt-dlp if found in the Location chain
+    return final
+
+
 @app.post("/submit", response_class=HTMLResponse)
 def submit(
     url: Annotated[
@@ -175,14 +179,24 @@ def submit(
     ],
 ):
     logger.info(f"Processing new recipe from URL: {url}")
+    # url = _normalize_ig_url(url)
+    # logger.debug(f"Normalized URL: {url}")
     try:
         logger.debug("Fetching video metadata...")
-        metadata = fetch_metadata(url)
+        metadata, error = fetch_metadata(url)
+        if error:
+            logger.error(f"Error fetching metadata: {error}")
+            return get_instagram_error(error)
+
         caption = metadata.get("description", "")
         logger.info(f"Caption length: {len(caption)} characters.")
 
         logger.debug("Downloading audio...")
-        audio = download_audio(url)
+        audio, error = download_audio(url)
+        if error:
+            logger.error(f"Error downloading audio: {error}")
+            return get_instagram_error(error)
+
         logger.debug("Transcribing audio...")
         transcribed_text = transcribe_audio(audio)
         logger.info(f"Transcription length: {len(transcribed_text)} characters.")
@@ -210,7 +224,7 @@ def submit(
         )
         result = send_recipe_to_mealie(recipe)
 
-        thumbnail_url = fetch_thumbnail(metadata)
+        thumbnail_url = get_thumbnail(metadata)
         if thumbnail_url:
             logger.debug(f"Setting recipe thumbnail in Mealie. URL: {thumbnail_url}")
             set_recipe_thumbnail(result, thumbnail_url)
