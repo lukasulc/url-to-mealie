@@ -1,6 +1,10 @@
 import json
+import os
 import subprocess
+import tempfile
 import uuid
+from contextlib import contextmanager
+from time import time
 
 from faster_whisper import WhisperModel
 from logger import get_configured_logger
@@ -22,6 +26,17 @@ def get_whisper_model():
     return _whisper_model
 
 
+def transcribe_audio(filename: str) -> str:
+    try:
+        model = get_whisper_model()
+        segments, _ = model.transcribe(filename)
+        text = " ".join(segment.text for segment in segments)
+        return text
+    except Exception as e:
+        logger.error(f"Error transcribing audio: {e}", exc_info=True)
+        raise
+
+
 def classify_instagram_error(stderr: str) -> str:
     s = (stderr or "").lower()
     if "rate-limit" in s or "rate limit" in s:
@@ -39,42 +54,33 @@ def download_audio(
     url: str, args=["yt-dlp", "-x", "--audio-format", "mp3", "-o"]
 ) -> str:
     filename = f"/tmp/{uuid.uuid4()}.mp3"
-    try:
-        subprocess.run(
-            args + [filename, url],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Error downloading audio: {e.stderr}", exc_info=True)
-        if len(args) == 5:
-            logger.info("Retrying without audio format specification...")
-            return download_audio(
-                url,
-                args=[
-                    "yt-dlp",
-                    "-x",
-                    "--audio-format",
-                    "-o",
-                    "--user-agent",
-                    MOBILE_UA,
-                    "mp3",
-                ],
+
+    with cookies_file_from_env() as cookies_path:
+        try:
+            subprocess.run(
+                args + [filename, url, "--cookies", cookies_path],
+                check=True,
+                capture_output=True,
+                text=True,
             )
-        return None, classify_instagram_error(e.stderr)
-    return filename
-
-
-def transcribe_audio(filename: str) -> str:
-    try:
-        model = get_whisper_model()
-        segments, _ = model.transcribe(filename)
-        text = " ".join(segment.text for segment in segments)
-        return text
-    except Exception as e:
-        logger.error(f"Error transcribing audio: {e}", exc_info=True)
-        raise
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Error downloading audio: {e.stderr}", exc_info=True)
+            if len(args) == 5:
+                logger.info("Retrying without audio format specification...")
+                return download_audio(
+                    url,
+                    args=[
+                        "yt-dlp",
+                        "-x",
+                        "--audio-format",
+                        "--user-agent",
+                        MOBILE_UA,
+                        "mp3",
+                        "-o",
+                    ],
+                )
+            return None, classify_instagram_error(e.stderr)
+        return filename, None
 
 
 def fetch_metadata(
@@ -86,29 +92,82 @@ def fetch_metadata(
     ],
 ) -> dict:
     """Download metadata from Social Media video."""
-    try:
-        result = subprocess.run(
-            args + [url],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        return json.loads(result.stdout)
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Error downloading audio: {e.stderr}", exc_info=True)
-        if len(args) == 3:
-            logger.info("Retrying without audio format specification...")
-            return download_audio(
-                url,
-                args=[
-                    "yt-dlp",
-                    "-x",
-                    "--audio-format",
-                    "mp3",
-                    "--user-agent",
-                    MOBILE_UA,
-                    "-o",
-                ],
+    with cookies_file_from_env() as cookies_path:
+        try:
+            result = subprocess.run(
+                args + [url, "--cookies", cookies_path],
+                capture_output=True,
+                text=True,
+                check=True,
             )
-        return None, classify_instagram_error(e.stderr)
-    return None
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Error downloading audio: {e.stderr}", exc_info=True)
+            if len(args) == 3:
+                logger.info("Retrying without audio format specification...")
+                return fetch_metadata(
+                    url,
+                    args=["yt-dlp", "-j", "--no-warnings", "--user-agent", MOBILE_UA],
+                )
+            return None, classify_instagram_error(e.stderr)
+
+        return json.loads(result.stdout), None
+
+
+@contextmanager
+def cookies_file_from_env():
+    """
+    Create a temporary Netscape cookies.txt from env and yield its path.
+    Supports:
+      - IG_COOKIES_NETSCAPE (verbatim content)
+      - IG_SESSIONID / IG_CSRFTOKEN
+      - IG_COOKIE_STRING: "name=value; name2=value2"
+    The file is deleted on exit.
+    """
+    ns_content = os.getenv("IG_COOKIES_NETSCAPE")
+    sessionid = os.getenv("IG_SESSIONID")
+    csrftoken = os.getenv("IG_CSRFTOKEN")
+    cookie_str = os.getenv("IG_COOKIE_STRING")
+    domain = ".instagram.com"
+    # now = int(time())
+    # far-future expiry to satisfy format
+    exp = 2147483647
+
+    lines = []
+    if ns_content:
+        # Use verbatim; ensure it has the required header line
+        if not ns_content.lstrip().startswith("# Netscape HTTP Cookie File"):
+            ns_content = "# Netscape HTTP Cookie File\n" + ns_content
+        content = ns_content
+    else:
+        lines.append("# Netscape HTTP Cookie File")
+
+        def add_cookie(name, value):
+            if value:
+                # domain, includeSubdomains, path, secure, expiry, name, value
+                lines.append(f"{domain}\tTRUE\t/\tTRUE\t{exp}\t{name}\t{value}")
+
+        if sessionid:
+            add_cookie("sessionid", sessionid)
+        if csrftoken:
+            add_cookie("csrftoken", csrftoken)
+
+        if not sessionid and cookie_str:
+            # parse "k=v; k2=v2"
+            for part in cookie_str.split(";"):
+                if "=" in part:
+                    k, v = part.strip().split("=", 1)
+                    add_cookie(k.strip(), v.strip())
+
+        content = "\n".join(lines) + "\n"
+
+    tmp = tempfile.NamedTemporaryFile(prefix="ig_cookies_", suffix=".txt", delete=False)
+    try:
+        tmp.write(content.encode("utf-8"))
+        tmp.flush()
+        tmp.close()
+        yield tmp.name
+    finally:
+        try:
+            os.remove(tmp.name)
+        except Exception:
+            pass
