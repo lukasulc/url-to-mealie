@@ -4,9 +4,9 @@ import subprocess
 import tempfile
 import uuid
 from contextlib import contextmanager
-from time import time
 
-from faster_whisper import WhisperModel
+from typing import Optional
+from faster_whisper import WhisperModel  # type: ignore
 from logger import get_configured_logger
 
 logger = get_configured_logger(__name__)
@@ -50,6 +50,10 @@ def classify_instagram_error(stderr: str) -> str:
     return "unknown"
 
 
+class InstagramError(Exception):
+    pass
+
+
 def download_audio(
     url: str, args=["yt-dlp", "-x", "--audio-format", "mp3", "-o"]
 ) -> str:
@@ -79,8 +83,8 @@ def download_audio(
                         "-o",
                     ],
                 )
-            return None, classify_instagram_error(e.stderr)
-        return filename, None
+            raise InstagramError(classify_instagram_error(e.stderr))
+        return filename
 
 
 def fetch_metadata(
@@ -108,9 +112,9 @@ def fetch_metadata(
                     url,
                     args=["yt-dlp", "-j", "--no-warnings", "--user-agent", MOBILE_UA],
                 )
-            return None, classify_instagram_error(e.stderr)
+            raise InstagramError(classify_instagram_error(e.stderr))
 
-        return json.loads(result.stdout), None
+        return json.loads(result.stdout)
 
 
 @contextmanager

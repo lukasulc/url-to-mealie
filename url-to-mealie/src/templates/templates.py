@@ -1,4 +1,7 @@
-def get_homepage(url: str, token: str) -> str:
+from typing import Any, Dict
+
+
+def get_homepage(url: str, token: str | None) -> str:
     """Generate the homepage HTML."""
     mealie_status = "Connected" if token and url else "Not configured"
     status_class = "success" if token and url else "danger"
@@ -137,6 +140,14 @@ def get_homepage(url: str, token: str) -> str:
                             </button>
                         </form>
                     </div>
+                    <div class="p-4">
+                        <a href="/status">
+                            <button class="btn btn-secondary btn-lg w-100 d-flex align-items-center justify-content-center gap-2">
+                                <i class="fas fa-magic"></i>
+                                Check status
+                            </button>
+                        </a>
+                    </div>
 
                     <!-- Features -->
                     <div class="bg-light p-4 border-top">
@@ -211,7 +222,7 @@ def get_homepage(url: str, token: str) -> str:
 
 def get_exception_page(error_message: str) -> str:
     """Generate the exception page HTML."""
-    f"""
+    return f"""
     <!DOCTYPE html>
     <html lang="en">
     <head>
@@ -341,7 +352,7 @@ def get_error_page(error_message: str, url: str) -> str:
     """
 
 
-def get_instagram_error(errors: str, suggestions: str = None) -> str:
+def get_instagram_error(errors: str, suggestions: str | None = None) -> str:
     return f"""
     <!DOCTYPE html>
     <head>
@@ -387,5 +398,141 @@ def get_instagram_error(errors: str, suggestions: str = None) -> str:
                 </div>
             </div>
         </div>
+    </html>
+    """
+
+
+def get_status_page(queue_status: Dict[str, Any], mealie_url) -> str:
+    return """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>URL to Mealie - All Jobs Status</title>
+        
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+        
+        <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+        
+        <style>
+            body {
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh;
+            }
+            
+            .recipe-card {
+                background: white;
+                border-radius: 1rem;
+                box-shadow: 0 1rem 3rem rgba(0,0,0,.1);
+                border-top: 4px solid #667eea;
+            }
+            
+            .logo-circle {
+                width: 4rem;
+                height: 4rem;
+                background: linear-gradient(135deg, #667eea, #764ba2);
+            }
+            
+            .btn-primary {
+                background: linear-gradient(135deg, #667eea, #764ba2);
+                border: none;
+            }
+            
+            .btn-primary:hover {
+                background: linear-gradient(135deg, #5a6fd8, #6b4190);
+                transform: translateY(-1px);
+            }
+            
+            .platform-badge {
+                font-size: 0.8rem;
+            }
+            
+            .feature-icon {
+                color: #667eea;
+            }
+            
+            .input-group-text {
+                background: #f8f9fa;
+                border-right: none;
+            }
+            
+            .form-control {
+                border-left: none;
+            }
+            
+            .form-control:focus {
+                border-color: #667eea;
+                box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+            }
+        </style>
+    </head>
+    <body class="d-flex py-4">
+        <div class="container">
+            <div class="row justify-content-center">
+                <div class="col-md-6">
+                    <h1>All Jobs Status</h1>
+                     <button onclick="location.href='/'" class="btn btn-secondary btn-lg w-100 d-flex align-items-center justify-content-center gap-2">
+                            <i class="fas fa-magic"></i>
+                            Back to Home
+                    </button>
+                    <div id="current">Loading data about current task...</div>
+                    <br>
+                    <div id="tasks">Loading queue...</div>
+                </div>
+            </div>
+        </div>
+        
+        <script>
+            async function updateStatus() {
+                const res = await fetch('/status/json');
+                const data = await res.json();
+
+                const curr_task = data.currently_processing
+
+                if (!curr_task) {
+                    document.getElementById('current').innerHTML = `Nothing is processing at the moment!`;
+                    document.getElementById('tasks').innerHTML = `No queued tasks!`;
+                    return;
+                }
+                
+                const startTime = curr_task.started_at ? new Date(curr_task.started_at).toLocaleTimeString() : '';
+                        const error = curr_task.error ? `<br>Error: ${curr_task.error}` : '';
+                        
+                document.getElementById('current').innerHTML = `
+                    <div class="curr_task current ${curr_task.status}">
+                        <strong>${curr_task.status.toUpperCase()}</strong> - ${curr_task.url}
+                        ${startTime ? `<br>Started: ${startTime}` : ''}
+                        ${error}
+                    </div>
+                `;
+
+                let html = `<p>Unfinished tasks: ${data.queue_count}</p>`;
+                
+                if (data.queued_tasks.length > 0) {
+                    data.queued_tasks.forEach(task => {
+                        const startTime = task.started_at ? new Date(task.started_at).toLocaleTimeString() : '';
+                        const error = task.error ? `<br>Error: ${task.error}` : '';
+                        
+                        html += `
+                            <div class="task ${task.status}">
+                                <strong>${task.status.toUpperCase()}</strong> - ${task.url}
+                                ${startTime ? `<br>Started: ${startTime}` : ''}
+                                <br>Position in Queue: ${task.queue_position}
+                                ${error}
+                            </div>
+                        `;
+                    });
+                } else {
+                    html += `No queued tasks!`;
+                }
+                
+                document.getElementById('tasks').innerHTML = html;
+            }
+            
+            updateStatus();
+            setInterval(updateStatus, 2000);
+        </script>
+    </body>
     </html>
     """

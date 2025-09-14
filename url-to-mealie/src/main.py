@@ -1,23 +1,33 @@
-import json
 import os
 import subprocess
 from datetime import datetime
 from typing import Annotated
 
 import requests
-from ai.audio_processing import download_audio, fetch_metadata, transcribe_audio
-from ai.recipe_parser import create_prompt, naive_parse, smart_parse
-from fastapi import FastAPI, Form, HTTPException
-from fastapi.exceptions import RequestValidationError
-from fastapi.requests import Request
-from fastapi.responses import HTMLResponse
+from ai.audio_processing import (
+    download_audio,
+    fetch_metadata,
+    transcribe_audio,
+    InstagramError,
+)
+from ai.llm_task_queue import LLMTaskQueue, create_prompt
+from ai.task import Task, TaskContext, TaskStatus
+from fastapi import FastAPI, Form, status  # pyright: ignore[reportMissingImports]
+from fastapi.exceptions import (  # pyright: ignore[reportMissingImports]
+    RequestValidationError,
+)
+from fastapi.requests import Request  # pyright: ignore[reportMissingImports]
+from fastapi.responses import (  # pyright: ignore[reportMissingImports]
+    HTMLResponse,
+    RedirectResponse,
+)
 from logger import get_configured_logger
 from templates.templates import (
     get_error_page,
     get_exception_page,
     get_homepage,
     get_instagram_error,
-    get_success_page,
+    get_status_page,
 )
 from validators.config_validator import validate_mealie_config
 
@@ -31,97 +41,21 @@ app_state = {
     "model_loaded": False,
 }
 
-MEALIE_BASE_URL = os.getenv("MEALIE_BASE_URL", "").rstrip("/")
+llm_queue = LLMTaskQueue()
+
+MEALIE_BASE_URL = os.getenv("MEALIE_BASE_URL", ".").rstrip("/")
 MEALIE_STATIC_URL = os.getenv("MEALIE_STATIC_URL", MEALIE_BASE_URL).rstrip("/")
 MEALIE_TOKEN = os.getenv("MEALIE_TOKEN")
 MEALIE_URL = f"{MEALIE_BASE_URL}/api/recipes" if MEALIE_BASE_URL else ""
 
 
-def get_thumbnail(metadata: dict) -> str:
+def get_thumbnail(metadata: dict) -> str | None:
     """Get thumbnail from video metadata."""
     thumbnail_url = metadata.get("thumbnail")
     if not thumbnail_url:
         logger.warning("No thumbnail found in metadata")
         return None
     return thumbnail_url
-
-
-def send_recipe_to_mealie(recipe: dict):
-    """Send recipe to Mealie API.
-
-    Args:
-        recipe (dict): Recipe data to send
-
-    Returns:
-        dict: Response from Mealie API
-
-    Raises:
-        HTTPException: If there's an error communicating with Mealie
-    """
-
-    logger.info(f"Sending recipe to Mealie at {MEALIE_BASE_URL}")
-
-    try:
-        recipe_json_str = json.dumps(recipe)
-        request_body = {"includeTags": False, "data": recipe_json_str}
-
-        headers = {
-            "Authorization": f"Bearer {MEALIE_TOKEN}",
-            "Content-Type": "application/json",
-        }
-        r = requests.post(
-            f"{MEALIE_URL}/create/html-or-json", headers=headers, json=request_body
-        )
-        r.raise_for_status()
-        return r.json()
-
-    except requests.exceptions.ConnectionError:
-        error_msg = f"Could not connect to Mealie at {MEALIE_BASE_URL}. Please check the URL and ensure Mealie is running."
-        logger.error(error_msg)
-        raise HTTPException(status_code=503, detail=error_msg)
-
-    except requests.exceptions.HTTPError as e:
-        error_msg = f"Mealie API error: {str(e)}"
-        logger.error(error_msg)
-        raise HTTPException(status_code=e.response.status_code, detail=error_msg)
-
-
-def set_recipe_thumbnail(slug: str, thumbnail_url: str):
-    """Set recipe thumbnail in Mealie.
-
-    Args:
-        slug (str): Recipe slug/ID
-        thumbnail_url (str): URL of the thumbnail image
-
-    Returns:
-        dict: Response from Mealie API
-
-    Raises:
-        HTTPException: If there's an error communicating with Mealie
-    """
-
-    try:
-        request_body = {"includeTags": True, "url": thumbnail_url}
-
-        headers = {
-            "Authorization": f"Bearer {MEALIE_TOKEN}",
-            "Content-Type": "application/json",
-        }
-        r = requests.post(
-            f"{MEALIE_URL}/{slug}/image", headers=headers, json=request_body
-        )
-        r.raise_for_status()
-        return r.json()
-
-    except requests.exceptions.ConnectionError:
-        error_msg = f"Could not connect to Mealie at {MEALIE_BASE_URL}. Please check the URL and ensure Mealie is running."
-        logger.error(error_msg)
-        raise HTTPException(status_code=503, detail=error_msg)
-
-    except requests.exceptions.HTTPError as e:
-        error_msg = f"Mealie API error: {str(e)}"
-        logger.error(error_msg)
-        raise HTTPException(status_code=e.response.status_code, detail=error_msg)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -181,62 +115,47 @@ def submit(
     logger.info(f"Processing new recipe from URL: {url}")
     # url = _normalize_ig_url(url)
     # logger.debug(f"Normalized URL: {url}")
+
+    task = Task(url=url)
     try:
         logger.debug("Fetching video metadata...")
-        metadata, error = fetch_metadata(url)
-        if error:
+        try:
+            metadata = fetch_metadata(url)
+        except InstagramError as error:
             logger.error(f"Error fetching metadata: {error}")
-            return get_instagram_error(error)
+            return get_instagram_error(str(error))
 
         caption = metadata.get("description", "")
         logger.info(f"Caption length: {len(caption)} characters.")
 
         logger.debug("Downloading audio...")
-        audio, error = download_audio(url)
-        if error:
+        try:
+            audio = download_audio(url)
+        except InstagramError as error:
             logger.error(f"Error downloading audio: {error}")
-            return get_instagram_error(error)
+            return get_instagram_error(str(error))
 
         logger.debug("Transcribing audio...")
+        task.status = TaskStatus.TRANSCRIBING
         transcribed_text = transcribe_audio(audio)
         logger.info(f"Transcription length: {len(transcribed_text)} characters.")
 
-        try:
-            logger.debug("Parsing recipe using LLM")
-            recipe = smart_parse(create_prompt(caption, transcribed_text))
-        except Exception as e:
-            logger.error(
-                f"Error parsing recipe with LLM: {e}. Falling back to naive parser.",
-                exc_info=True,
-            )
-            recipe = naive_parse(transcribed_text)
-
-        logger.info(
-            f"Parsed recipe: {len(recipe['recipeIngredient'])} ingredients, "
-            f"{len(recipe['recipeInstructions'])} instructions"
+        task.status = TaskStatus.GENERATING
+        task.context = TaskContext(
+            caption=caption,
+            transcription=transcribed_text,
+            thumbnail=get_thumbnail(metadata),
+            prompt=create_prompt(caption, transcribed_text),
         )
-        logger.debug(f"Recipe data: {recipe}")
-
-        logger.debug("Sending recipe to Mealie")
-        recipe["orgURL"] = url
-        recipe["description"] = (
-            recipe.get("description", "") + f"**[ORIGINAL CAPTION]**{caption}"
-        )
-        result = send_recipe_to_mealie(recipe)
-
-        thumbnail_url = get_thumbnail(metadata)
-        if thumbnail_url:
-            logger.debug(f"Setting recipe thumbnail in Mealie. URL: {thumbnail_url}")
-            set_recipe_thumbnail(result, thumbnail_url)
-
-        logger.info(f"Recipe added successfully with ID: {result}")
+        llm_queue.submit_task(task)
 
         app_state["recipes_processed"] += 1
         app_state["last_error"] = None
 
-        recipe_url = f"{MEALIE_STATIC_URL}/g/home/r/{result}"
+        return RedirectResponse(url="/status", status_code=status.HTTP_303_SEE_OTHER)
+        # recipe_url = f"{MEALIE_STATIC_URL}/g/home/r/{result}"
 
-        return get_success_page(recipe_url, recipe.get("name", "Recipe"), app_state)
+        # return get_success_page(recipe_url, recipe.get("name", "Recipe"), app_state)
 
     except subprocess.CalledProcessError as e:
         error_msg = (
@@ -255,14 +174,19 @@ def submit(
         return get_error_page(str(e), url)
 
 
-def main():
-    validate_mealie_config(MEALIE_TOKEN, MEALIE_BASE_URL)
-    """Main entry point for the application."""
-    if not MEALIE_TOKEN:
-        logger.error("MEALIE_TOKEN environment variable is not set!")
+@app.get("/status", response_class=HTMLResponse)
+def queue_status():
+    return get_status_page(llm_queue.get_queue_status(), MEALIE_URL)
 
-    if not MEALIE_BASE_URL:
-        logger.error("MEALIE_BASE_URL environment variable is not set!")
+
+@app.get("/status/json")
+def queue_status_json():
+    return llm_queue.get_queue_status()
+
+
+def main():
+    """Main entry point for the application."""
+    validate_mealie_config(MEALIE_TOKEN, MEALIE_BASE_URL)
 
 
 if __name__ == "__main__":
