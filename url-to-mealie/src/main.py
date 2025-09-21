@@ -112,7 +112,7 @@ def submit(
         Form(
             description="Instagram or TikTok video URL",
             example="https://www.instagram.com/p/abc123/",
-            pattern=r"^https?:\/\/(www\.)?(instagram\.com\/|tiktok\.com\/|youtube\.com\/).+",
+            pattern=r"^https?:\/\/(www\.)?(instagram\.com\/|tiktok\.com\/|youtube\.com\/|facebook\.com\/).+",
         ),
     ],
 ):
