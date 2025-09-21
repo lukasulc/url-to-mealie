@@ -1,0 +1,10 @@
+{% macro feature_item(icon, text) %}
+<div class="d-flex align-items-center gap-2">
+  <i class="fas {{ icon }} feature-icon"></i>
+  <small class="text-muted">{{ text }}</small>
+</div>
+{% endmacro %} {% macro platform_badge(icon, text) %}
+<span class="badge bg-light text-dark platform-badge">
+  <i class="{{ icon }}"></i> {{ text }}
+</span>
+{% endmacro %}

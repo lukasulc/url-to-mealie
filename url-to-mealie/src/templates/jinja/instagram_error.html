@@ -1,0 +1,31 @@
+{% extends "base.html" %} {% block title %}Instagram Error - URL to Mealie{%
+endblock %} {% block content %}
+<div class="card shadow-sm">
+  <div class="card-body">
+    <div class="text-center mb-3">
+      <i class="fab fa-instagram text-danger fs-1"></i>
+    </div>
+    <h5 class="card-title text-center">Instagram error</h5>
+    <p class="text-muted text-center">That pesky Instagram API is acting up.</p>
+    <div class="alert alert-warning">
+      <strong>Errors:</strong>
+      <ul class="mb-0">
+        {{ errors|safe }}
+      </ul>
+    </div>
+    {% if suggestions %}
+    <div class="alert alert-warning">
+      <strong>What you can do:</strong>
+      <ul class="mb-0">
+        {{ suggestions|safe }}
+      </ul>
+    </div>
+    {% endif %}
+    <div class="d-grid gap-2 d-md-flex justify-content-md-center">
+      <a href="/" class="btn btn-outline-primary btn-lg">
+        <i class="fas fa-plus me-2"></i>Wait and/or Try Another Recipe
+      </a>
+    </div>
+  </div>
+</div>
+{% endblock %}

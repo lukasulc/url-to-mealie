@@ -2,6 +2,7 @@
 fastapi>=0.116.1
 uvicorn>=0.35.0
 python-multipart>=0.0.20
+jinja2>=3.1.6
 
 # Video and audio processing
 yt-dlp>=2025.09.05

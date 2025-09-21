@@ -1,0 +1,75 @@
+{% extends "base.html" %} {% block title %}URL to Mealie - All Jobs Status{%
+endblock %} {% block column_width %}6{% endblock %} {% block content %}
+<h1>All Jobs Status</h1>
+<button
+  onclick="location.href='/'"
+  class="btn btn-secondary btn-lg w-100 d-flex align-items-center justify-content-center gap-2"
+>
+  <i class="fas fa-magic"></i>
+  Back to Home
+</button>
+<div id="current">Loading data about current task...</div>
+<br />
+<div id="tasks">Loading queue...</div>
+{% endblock %} {% block scripts %}
+<script>
+  async function updateStatus() {
+    const res = await fetch("/status/json");
+    const data = await res.json();
+
+    const curr_task = data.currently_processing;
+
+    if (!curr_task) {
+      document.getElementById(
+        "current"
+      ).innerHTML = `Nothing is processing at the moment!`;
+      document.getElementById("tasks").innerHTML = `No queued tasks!`;
+      return;
+    }
+
+    const startTime = curr_task.started_at
+      ? new Date(curr_task.started_at).toLocaleTimeString()
+      : "";
+    const error = curr_task.error ? `<br>Error: ${curr_task.error}` : "";
+
+    document.getElementById("current").innerHTML = `
+            <div class="curr_task current ${curr_task.status}">
+                <strong>${curr_task.status.toUpperCase()}</strong> - ${
+      curr_task.url
+    }
+                ${startTime ? `<br>Started: ${startTime}` : ""}
+                ${error}
+            </div>
+        `;
+
+    let html = `<p>Unfinished tasks: ${data.queue_count}</p>`;
+
+    if (data.queued_tasks.length > 0) {
+      data.queued_tasks.forEach((task) => {
+        const startTime = task.started_at
+          ? new Date(task.started_at).toLocaleTimeString()
+          : "";
+        const error = task.error ? `<br>Error: ${task.error}` : "";
+
+        html += `
+                    <div class="task ${task.status}">
+                        <strong>${task.status.toUpperCase()}</strong> - ${
+          task.url
+        }
+                        ${startTime ? `<br>Started: ${startTime}` : ""}
+                        <br>Position in Queue: ${task.queue_position}
+                        ${error}
+                    </div>
+                `;
+      });
+    } else {
+      html += `No queued tasks!`;
+    }
+
+    document.getElementById("tasks").innerHTML = html;
+  }
+
+  updateStatus();
+  setInterval(updateStatus, 2000);
+</script>
+{% endblock %}

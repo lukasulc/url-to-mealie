@@ -1,0 +1,131 @@
+{% extends "base.html" %} {% from "macros.html" import feature_item,
+platform_badge %} {% block content %}
+<div class="recipe-card">
+  <!-- Header -->
+  <div class="p-4 text-center border-bottom">
+    <div
+      class="logo-circle rounded-circle d-flex align-items-center justify-content-center mx-auto mb-3"
+    >
+      <i class="fas fa-utensils text-white fa-2x"></i>
+    </div>
+    <h1 class="h3 fw-bold text-dark mb-2">URL to Mealie</h1>
+    <p class="text-muted mb-3">
+      Transform social media recipes into organized cooking guides
+    </p>
+
+    <div class="d-flex justify-content-center mb-2">
+      <span class="badge bg-{{ status_class }} d-flex align-items-center gap-2">
+        <i
+          class="fas {{ 'fa-check-circle' if status_class == 'success' else 'fa-exclamation-triangle' }}"
+        ></i>
+        Mealie: {{ mealie_status }}
+      </span>
+    </div>
+
+    {% if url %}
+    <small class="text-muted">{{ url }}</small>
+    {% endif %}
+  </div>
+
+  <!-- Form -->
+  <div class="p-4">
+    <form method="post" action="/submit" id="recipeForm">
+      <div class="mb-3">
+        <label for="url" class="form-label fw-semibold">Recipe Video URL</label>
+        <div class="input-group">
+          <span class="input-group-text">
+            <i class="fas fa-link text-muted"></i>
+          </span>
+          <input
+            type="url"
+            id="url"
+            name="url"
+            class="form-control"
+            placeholder="https://www.instagram.com/p/abc123/"
+            pattern="^https?:\/\/(www\.)?(instagram\.com\/|tiktok\.com\/|youtube\.com\/).*"
+            required
+            autocomplete="url"
+          />
+        </div>
+
+        <!-- Supported Platforms -->
+        <div class="d-flex flex-wrap gap-2 mt-2">
+          {{ platform_badge("fab fa-instagram text-danger", "Instagram") }} {{
+          platform_badge("fab fa-tiktok text-dark", "TikTok") }} {{
+          platform_badge("fab fa-youtube text-danger", "YouTube") }} {{
+          platform_badge("fas fa-plus", "More") }}
+        </div>
+      </div>
+
+      <button
+        type="submit"
+        class="btn btn-primary btn-lg w-100 d-flex align-items-center justify-content-center gap-2"
+        id="submitBtn"
+      >
+        <i class="fas fa-magic"></i>
+        Parse Recipe
+      </button>
+    </form>
+  </div>
+  <div class="p-4">
+    <a href="/status">
+      <button
+        class="btn btn-secondary btn-lg w-100 d-flex align-items-center justify-content-center gap-2"
+      >
+        <i class="fas fa-magic"></i>
+        Check status
+      </button>
+    </a>
+  </div>
+
+  <!-- Features -->
+  <div class="bg-light p-4 border-top">
+    <h6 class="text-center mb-3 text-muted fw-semibold">What this tool does</h6>
+    <div class="row g-3">
+      <div class="col-6">
+        {{ feature_item("fa-download", "Downloads video") }}
+      </div>
+      <div class="col-6">
+        {{ feature_item("fa-microphone", "Transcribes audio") }}
+      </div>
+      <div class="col-6">{{ feature_item("fa-brain", "AI parsing") }}</div>
+      <div class="col-6">
+        {{ feature_item("fa-utensils", "Saves to Mealie") }}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %} {% block scripts %}
+<script>
+  const form = document.getElementById("recipeForm");
+  const submitBtn = document.getElementById("submitBtn");
+  const urlInput = document.getElementById("url");
+
+  // Form submission handling
+  form.addEventListener("submit", function (e) {
+    submitBtn.disabled = true;
+    submitBtn.innerHTML =
+      '<i class="fas fa-spinner fa-spin me-2"></i>Processing Recipe...';
+  });
+
+  // Real-time URL validation
+  urlInput.addEventListener("input", function () {
+    const url = this.value;
+    const isValid =
+      /^https?:\/\/(www\.)?(instagram\.com\/|tiktok\.com\/|youtube\.com\/).*/.test(
+        url
+      );
+
+    if (url && !isValid) {
+      this.classList.add("is-invalid");
+    } else {
+      this.classList.remove("is-invalid");
+    }
+  });
+
+  // Auto-focus
+  document.addEventListener("DOMContentLoaded", function () {
+    urlInput.focus();
+  });
+</script>
+{% endblock %}

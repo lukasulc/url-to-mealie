@@ -59,8 +59,9 @@ def get_thumbnail(metadata: dict) -> str | None:
 
 
 @app.get("/", response_class=HTMLResponse)
-def form():
+def form(request: Request):
     return get_homepage(
+        request,
         MEALIE_URL,
         MEALIE_TOKEN,
     )
@@ -86,7 +87,9 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     for err in errors:
         if "url" in err.get("loc", []):
             messages.append(err["msg"])
-    error_html = f"<div>• {get_exception_page('</div><div>• '.join(messages))}</div>"
+    error_html = (
+        f"<div>• {get_exception_page(request, '</div><div>• '.join(messages))}</div>"
+    )
     return HTMLResponse(content=error_html, status_code=422)
 
 
@@ -103,6 +106,7 @@ def _normalize_ig_url(url: str) -> str:
 
 @app.post("/submit", response_class=HTMLResponse)
 def submit(
+    request: Request,
     url: Annotated[
         str,
         Form(
@@ -123,7 +127,7 @@ def submit(
             metadata = fetch_metadata(url)
         except InstagramError as error:
             logger.error(f"Error fetching metadata: {error}")
-            return get_instagram_error(str(error))
+            return get_instagram_error(request, str(error))
 
         caption = metadata.get("description", "")
         logger.info(f"Caption length: {len(caption)} characters.")
@@ -133,7 +137,7 @@ def submit(
             audio = download_audio(url)
         except InstagramError as error:
             logger.error(f"Error downloading audio: {error}")
-            return get_instagram_error(str(error))
+            return get_instagram_error(request, str(error))
 
         logger.debug("Transcribing audio...")
         task.status = TaskStatus.TRANSCRIBING
@@ -162,7 +166,7 @@ def submit(
             f"Failed to download video: {e.stderr.decode() if e.stderr else str(e)}"
         )
         logger.error(error_msg)
-        return get_error_page(error_msg, url)
+        return get_error_page(request, error_msg, url)
 
     except Exception as e:
         logger.error(f"Error processing recipe: {str(e)}", exc_info=True)
@@ -171,12 +175,14 @@ def submit(
             "error": str(e),
             "url": url,
         }
-        return get_error_page(str(e), url)
+        return get_error_page(request, str(e), url)
 
 
 @app.get("/status", response_class=HTMLResponse)
-def queue_status():
-    return get_status_page(llm_queue.get_queue_status(), MEALIE_URL)
+def queue_status(
+    request: Request,
+):
+    return get_status_page(request, llm_queue.get_queue_status(), MEALIE_URL)
 
 
 @app.get("/status/json")

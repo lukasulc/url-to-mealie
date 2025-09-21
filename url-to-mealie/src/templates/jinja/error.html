@@ -1,0 +1,19 @@
+{% extends "base.html" %} {% block title %}Error Processing Recipe - URL to
+Mealie{% endblock %} {% block content %}
+<div class="recipe-card p-5 text-center">
+  <div class="text-danger mb-4">
+    <i class="fas fa-exclamation-circle fa-4x"></i>
+  </div>
+  <h2 class="h4 mb-3">Processing Failed</h2>
+  <p class="text-muted mb-3">We couldn't process your recipe from:</p>
+  <div class="alert alert-secondary">
+    <code class="text-break">{{ url }}</code>
+  </div>
+  <div class="alert alert-danger text-start">
+    <strong>Error:</strong> {{ error_message }}
+  </div>
+  <a href="/" class="btn btn-primary btn-lg">
+    <i class="fas fa-arrow-left me-2"></i>Try Again
+  </a>
+</div>
+{% endblock %}

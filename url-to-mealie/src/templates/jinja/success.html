@@ -1,0 +1,26 @@
+{% extends "base.html" %} {% block title %}Recipe Added Successfully - URL to
+Mealie{% endblock %} {% block column_width %}7{% endblock %} {% block content %}
+<div class="success-card p-5 text-center">
+  <div class="text-success mb-4">
+    <i class="fas fa-check-circle fa-4x"></i>
+  </div>
+  <h2 class="h4 mb-3">Recipe Added Successfully!</h2>
+  <p class="text-muted mb-4">
+    "{{ recipe_name }}" has been parsed and added to your Mealie collection.
+  </p>
+
+  <div class="d-grid gap-3 d-md-flex justify-content-md-center">
+    <a href="{{ recipe_url }}" class="btn btn-success btn-lg" target="_blank">
+      <i class="fas fa-external-link-alt me-2"></i>View in Mealie
+    </a>
+    <a href="/" class="btn btn-outline-primary btn-lg">
+      <i class="fas fa-plus me-2"></i>Add Another Recipe
+    </a>
+  </div>
+
+  <div class="alert alert-info mt-4">
+    <i class="fas fa-utensils me-2"></i>
+    <strong>Total Recipes Processed:</strong> {{ recipes_processed }}
+  </div>
+</div>
+{% endblock %}
