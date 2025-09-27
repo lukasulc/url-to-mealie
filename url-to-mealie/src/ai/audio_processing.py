@@ -8,6 +8,8 @@ from contextlib import contextmanager
 from typing import Optional
 from faster_whisper import WhisperModel  # type: ignore
 from logger import get_configured_logger
+from ai.task import Task, TaskStatus, TaskContext
+from ai.llm_task_queue import LLMTaskQueue, create_prompt
 
 logger = get_configured_logger(__name__)
 
@@ -52,6 +54,36 @@ def classify_instagram_error(stderr: str) -> str:
 
 class InstagramError(Exception):
     pass
+
+
+def process_audio(
+    url: str,
+    llm_queue: LLMTaskQueue,
+    task: Task,
+    caption: str,
+    metadata: dict,
+):
+    try:
+        logger.debug("Downloading audio...")
+        audio = download_audio(url)
+
+        logger.debug("Transcribing audio...")
+        task.status = TaskStatus.TRANSCRIBING
+        transcribed_text = transcribe_audio(audio)
+        logger.info(f"Transcription length: {len(transcribed_text)} characters.")
+
+        task.status = TaskStatus.GENERATING
+        task.context = TaskContext(
+            caption=caption,
+            transcription=transcribed_text,
+            thumbnail=get_thumbnail(metadata),
+            prompt=create_prompt(caption, transcribed_text),
+        )
+        llm_queue.submit_task(task)
+    except Exception as e:
+        logger.error(f"Background processing error: {str(e)}", exc_info=True)
+        task.status = TaskStatus.FAILED
+        task.error = str(e)
 
 
 def download_audio(
@@ -115,6 +147,15 @@ def fetch_metadata(
             raise InstagramError(classify_instagram_error(e.stderr))
 
         return json.loads(result.stdout)
+
+
+def get_thumbnail(metadata: dict) -> str | None:
+    """Get thumbnail from video metadata."""
+    thumbnail_url = metadata.get("thumbnail")
+    if not thumbnail_url:
+        logger.warning("No thumbnail found in metadata")
+        return None
+    return thumbnail_url
 
 
 @contextmanager

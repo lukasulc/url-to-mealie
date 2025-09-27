@@ -31,6 +31,27 @@ platform_badge %} {% block content %}
   <div class="p-4">
     <form method="post" action="/submit" id="recipeForm">
       <div class="mb-3">
+        <label for="recipeName" class="form-label fw-semibold"
+          >Recipe Name</label
+        >
+        <div class="input-group">
+          <span class="input-group-text">
+            <i class="fas fa-utensils text-muted"></i>
+          </span>
+          <input
+            type="text"
+            id="recipeName"
+            name="recipeName"
+            class="form-control"
+            placeholder="Enter recipe name (letters and spaces only)"
+            required
+            autocomplete="off"
+            pattern="[a-zA-Z\s]{1,100}"
+            maxlength="100"
+          />
+        </div>
+      </div>
+      <div class="mb-3">
         <label for="url" class="form-label fw-semibold">Recipe Video URL</label>
         <div class="input-group">
           <span class="input-group-text">
@@ -100,12 +121,36 @@ platform_badge %} {% block content %}
   const form = document.getElementById("recipeForm");
   const submitBtn = document.getElementById("submitBtn");
   const urlInput = document.getElementById("url");
+  const recipeNameInput = document.getElementById("recipeName");
 
   // Form submission handling
   form.addEventListener("submit", function (e) {
     submitBtn.disabled = true;
     submitBtn.innerHTML =
       '<i class="fas fa-spinner fa-spin me-2"></i>Processing Recipe...';
+  });
+
+  // Real-time recipe name validation
+  recipeNameInput.addEventListener("input", function () {
+    const value = this.value;
+    // Only allow letters and spaces, between 1-100 characters
+    const isValid = /^[a-zA-Z\s]{1,100}$/.test(value);
+
+    // Remove any characters that aren't letters or spaces
+    this.value = value.replace(/[^a-zA-Z\s]/g, "");
+
+    if (value && !isValid) {
+      this.classList.add("is-invalid");
+      // submitBtn.disabled = true;
+    } else {
+      this.classList.remove("is-invalid");
+      // submitBtn.disabled = false;
+    }
+  });
+
+  // Auto-focus
+  document.addEventListener("DOMContentLoaded", function () {
+    recipeNameInput.focus();
   });
 
   // Real-time URL validation

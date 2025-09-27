@@ -1,12 +1,20 @@
-import json
 import os
-from typing import Any
+from functools import wraps
+from typing import Any, Callable, TypeVar
+from urllib.parse import urlparse
 
 import requests
 from ai.recipe_parser import naive_parse, smart_parse
 from ai.task import Task, TaskStatus
 from fastapi import FastAPI, HTTPException  # pyright: ignore[reportMissingImports]
 from logger import get_configured_logger
+from requests.exceptions import (
+    ConnectionError,
+    HTTPError,
+    InvalidJSONError,
+    Timeout,
+    TooManyRedirects,
+)
 
 app = FastAPI(title="Recipe Parser API")
 logger = get_configured_logger(__name__)
@@ -17,47 +25,136 @@ MEALIE_TOKEN = os.getenv("MEALIE_TOKEN")
 MEALIE_URL = f"{MEALIE_BASE_URL}/api/recipes" if MEALIE_BASE_URL else ""
 
 
-def send_recipe_to_mealie(recipe: dict):
+# Custom exceptions
+class MealieConfigError(Exception):
+    """Raised when Mealie configuration is invalid"""
+
+    pass
+
+
+class RecipeValidationError(Exception):
+    """Raised when recipe data validation fails"""
+
+    pass
+
+
+class ImageProcessingError(Exception):
+    """Raised when there's an error processing recipe images"""
+
+    pass
+
+
+T = TypeVar("T")
+
+
+def handle_mealie_errors(func: Callable[..., T]) -> Callable[..., T]:
+    """Decorator to handle common Mealie API errors consistently.
+
+    Handles:
+    - Connection errors (server down, network issues)
+    - Authentication errors
+    - Rate limiting
+    - Invalid data
+    - Server errors
+    - Timeouts
+    """
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            # Validate Mealie configuration
+            if not MEALIE_TOKEN or not MEALIE_BASE_URL:
+                raise MealieConfigError(
+                    "Mealie configuration is incomplete. Check MEALIE_TOKEN and MEALIE_BASE_URL."
+                )
+
+            # Validate base URL format
+            parsed_url = urlparse(MEALIE_BASE_URL)
+            if not all([parsed_url.scheme, parsed_url.netloc]):
+                raise MealieConfigError(f"Invalid Mealie base URL: {MEALIE_BASE_URL}")
+
+            return func(*args, **kwargs)
+
+        except ConnectionError:
+            error_msg = f"Could not connect to Mealie at {MEALIE_BASE_URL}. Please check the URL and ensure Mealie is running."
+            logger.error(error_msg)
+            raise HTTPException(status_code=503, detail=error_msg)
+
+        except Timeout:
+            error_msg = f"Request to Mealie timed out after {os.getenv('REQUEST_TIMEOUT', '30')} seconds"
+            logger.error(error_msg)
+            raise HTTPException(status_code=504, detail=error_msg)
+
+        except HTTPError as e:
+            status_code = getattr(e.response, "status_code", 500)
+            if status_code == 401:
+                error_msg = "Invalid or expired Mealie API token"
+            elif status_code == 429:
+                error_msg = "Too many requests to Mealie API"
+            elif status_code == 404:
+                error_msg = "Recipe or resource not found in Mealie"
+            else:
+                error_msg = f"Mealie API error: {str(e)}"
+            logger.error(error_msg)
+            raise HTTPException(status_code=status_code, detail=error_msg)
+
+        except InvalidJSONError:
+            error_msg = "Invalid JSON response from Mealie API"
+            logger.error(error_msg)
+            raise HTTPException(status_code=502, detail=error_msg)
+
+        except TooManyRedirects:
+            error_msg = "Too many redirects while connecting to Mealie"
+            logger.error(error_msg)
+            raise HTTPException(status_code=502, detail=error_msg)
+
+        except MealieConfigError as e:
+            logger.error(str(e))
+            raise HTTPException(status_code=500, detail=str(e))
+
+        except RecipeValidationError as e:
+            logger.error(f"Recipe validation failed: {e}")
+            raise HTTPException(status_code=400, detail=str(e))
+
+        except ImageProcessingError as e:
+            logger.error(f"Image processing failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+        except Exception as e:
+            logger.error(f"Unexpected error in Mealie operation: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail="Internal server error")
+
+    return wrapper
+
+
+@handle_mealie_errors
+def send_recipe_to_mealie(recipe_name: str) -> str:
     """Send recipe to Mealie API.
 
     Args:
-        recipe (dict): Recipe data to send
+        recipe_name (str): Recipe data to send
 
     Returns:
-        dict: Response from Mealie API
+        slug: Response from Mealie API
 
     Raises:
         HTTPException: If there's an error communicating with Mealie
+        MealieConfigError: If Mealie is not properly configured
+        RecipeValidationError: If recipe data is invalid
     """
+    logger.info(f"Sending recipe to Mealie at {MEALIE_BASE_URL}: {recipe_name}")
 
-    logger.info(f"Sending recipe to Mealie at {MEALIE_BASE_URL}")
-
-    try:
-        recipe_json_str = json.dumps(recipe)
-        request_body = {"includeTags": False, "data": recipe_json_str}
-
-        headers = {
-            "Authorization": f"Bearer {MEALIE_TOKEN}",
-            "Content-Type": "application/json",
-        }
-        r = requests.post(
-            f"{MEALIE_URL}/create/html-or-json", headers=headers, json=request_body
-        )
-        r.raise_for_status()
-        return r.json()
-
-    except requests.exceptions.ConnectionError:
-        error_msg = f"Could not connect to Mealie at {MEALIE_BASE_URL}. Please check the URL and ensure Mealie is running."
-        logger.error(error_msg)
-        raise HTTPException(status_code=503, detail=error_msg)
-
-    except requests.exceptions.HTTPError as e:
-        error_msg = f"Mealie API error: {str(e)}"
-        logger.error(error_msg)
-        raise HTTPException(status_code=e.response.status_code, detail=error_msg)
+    headers = {
+        "Authorization": f"Bearer {MEALIE_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    r = requests.post(f"{MEALIE_URL}", headers=headers, json={"name": recipe_name})
+    r.raise_for_status()
+    return r.json()
 
 
-def set_recipe_thumbnail(slug: str, thumbnail_url: str):
+@handle_mealie_errors
+def set_recipe_thumbnail(slug: str, thumbnail_url: str) -> dict:
     """Set recipe thumbnail in Mealie.
 
     Args:
@@ -69,60 +166,121 @@ def set_recipe_thumbnail(slug: str, thumbnail_url: str):
 
     Raises:
         HTTPException: If there's an error communicating with Mealie
+        MealieConfigError: If Mealie is not properly configured
+        ImageProcessingError: If there's an error processing the image
     """
+    request_body = {"includeTags": True, "url": thumbnail_url}
 
-    try:
-        request_body = {"includeTags": True, "url": thumbnail_url}
-
-        headers = {
-            "Authorization": f"Bearer {MEALIE_TOKEN}",
-            "Content-Type": "application/json",
-        }
-        r = requests.post(
-            f"{MEALIE_URL}/{slug}/image", headers=headers, json=request_body
-        )
-        r.raise_for_status()
-        return r.json()
-
-    except requests.exceptions.ConnectionError:
-        error_msg = f"Could not connect to Mealie at {MEALIE_BASE_URL}. Please check the URL and ensure Mealie is running."
-        logger.error(error_msg)
-        raise HTTPException(status_code=503, detail=error_msg)
-
-    except requests.exceptions.HTTPError as e:
-        error_msg = f"Mealie API error: {str(e)}"
-        logger.error(error_msg)
-        raise HTTPException(status_code=e.response.status_code, detail=error_msg)
+    headers = {
+        "Authorization": f"Bearer {MEALIE_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    r = requests.post(f"{MEALIE_URL}/{slug}/image", headers=headers, json=request_body)
+    r.raise_for_status()
+    return r.json()
 
 
-def llm_response_to_mealie(task: Task, response: dict[str, Any]):
+@handle_mealie_errors
+def get_recipe(slug: str) -> dict:
+    """Get an existing recipe from Mealie.
+
+    Args:
+        slug (str): Recipe slug/ID
+
+    Returns:
+        dict: The recipe data
+
+    Raises:
+        HTTPException: If there's an error communicating with Mealie
+    """
+    headers = {
+        "Authorization": f"Bearer {MEALIE_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    r = requests.get(f"{MEALIE_URL}/{slug}", headers=headers)
+    r.raise_for_status()
+    return r.json()
+
+
+@handle_mealie_errors
+def update_recipe(slug: str, recipe_updates: dict) -> dict:
+    """Update an existing recipe in Mealie.
+
+    Args:
+        slug (str): Recipe slug/ID
+        recipe_updates (dict): Fields to update in the recipe
+
+    Returns:
+        dict: Updated recipe data
+
+    Raises:
+        HTTPException: If there's an error communicating with Mealie
+        MealieConfigError: If Mealie is not properly configured
+        RecipeValidationError: If recipe data is invalid
+    """
+    # Get current recipe and update only specified fields
+    recipe = get_recipe(slug)
+    recipe.update(recipe_updates)
+
+    logger.debug(f"Recipe after update: {recipe}")
+
+    headers = {
+        "Authorization": f"Bearer {MEALIE_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    r = requests.put(f"{MEALIE_URL}/{slug}", headers=headers, json=recipe)
+    r.raise_for_status()
+    return r.json()
+
+
+@handle_mealie_errors
+def llm_response_to_mealie(task: Task, response: dict[str, Any]) -> None:
+    """Process LLM response and update recipe in Mealie.
+
+    Args:
+        task (Task): Task containing recipe context and metadata
+        response (dict[str, Any]): LLM response with recipe information
+
+    Raises:
+        HTTPException: If there's an error communicating with Mealie
+        MealieConfigError: If Mealie is not properly configured
+        RecipeValidationError: If recipe data is invalid
+    """
+    if not task.context or not task.recipe_slug:
+        raise RecipeValidationError("Task context or recipe_slug missing")
+
     try:
         logger.debug("Parsing recipe using LLM")
         recipe = smart_parse(response)
     except Exception as e:
-        logger.error(
+        logger.warning(
             f"Error parsing recipe with LLM: {e}. Falling back to naive parser.",
             exc_info=True,
         )
         recipe = naive_parse(task.context.transcription)
 
+    if not recipe.get("recipeIngredient") and not recipe.get("recipeInstructions"):
+        raise RecipeValidationError(
+            "No ingredients or instructions found in parsed recipe"
+        )
+
     logger.info(
-        f"Parsed recipe: {len(recipe['recipeIngredient'])} ingredients, "
-        f"{len(recipe['recipeInstructions'])} instructions"
+        f"Parsed recipe: {len(recipe.get('recipeIngredient', []))} ingredients, "
+        f"{len(recipe.get('recipeInstructions', []))} instructions"
     )
     logger.debug(f"Recipe data: {recipe}")
 
     task.status = TaskStatus.SAVING
-    logger.debug("Sending recipe to Mealie")
-    recipe["orgURL"] = task.url
-    recipe["description"] = (
-        recipe.get("description", "") + f"**[ORIGINAL CAPTION]**{task.context.caption}"
-    )
-    result = send_recipe_to_mealie(recipe)
+    logger.debug("Updating recipe in Mealie")
 
-    thumbnail_url = task.context.thumbnail
-    if thumbnail_url:
-        logger.debug(f"Setting recipe thumbnail in Mealie. URL: {thumbnail_url}")
-        set_recipe_thumbnail(result, thumbnail_url)
+    # Update the existing recipe with the new information
+    recipe_updates = {
+        "orgURL": task.url,
+        "recipeIngredient": recipe.get("recipeIngredient", []),
+        "recipeInstructions": recipe.get("recipeInstructions", []),
+        "description": f"**[ORIGINAL CAPTION]**{task.original_caption}\n\n[Status: Processing completed]",
+    }
+    logger.debug(f"Recipe updates: {recipe_updates}")
 
-    logger.info(f"Recipe added successfully with ID: {result}")
+    mealie_response = update_recipe(task.recipe_slug, recipe_updates)
+    logger.info(f"Recipe updated successfully: {mealie_response}")

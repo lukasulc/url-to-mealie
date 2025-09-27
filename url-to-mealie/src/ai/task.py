@@ -25,13 +25,15 @@ class TaskStatus(str, Enum):
 @dataclass
 class Task:
     url: str
-    context: TaskContext
+    context: TaskContext | None = None
     id: int = int(datetime.now().timestamp() * 1000)
     status: TaskStatus = TaskStatus.PROCESSING
     queue_position: int = -1
     started_at: datetime = datetime.now()
     finished_at: datetime = datetime.now()
     error: Optional[str] = None
+    recipe_slug: Optional[str] = None
+    original_caption: Optional[str] = None
 
     def __init__(self, url: str = ""):
         self.url = url

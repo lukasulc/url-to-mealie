@@ -1,33 +1,31 @@
 import os
 import subprocess
 from datetime import datetime
+from threading import Thread
 from typing import Annotated
 
 import requests
 from ai.audio_processing import (
-    download_audio,
-    fetch_metadata,
-    transcribe_audio,
     InstagramError,
+    fetch_metadata,
+    get_thumbnail,
+    process_audio,
 )
-from ai.llm_task_queue import LLMTaskQueue, create_prompt
-from ai.task import Task, TaskContext, TaskStatus
-from fastapi import FastAPI, Form, status  # pyright: ignore[reportMissingImports]
-from fastapi.exceptions import (  # pyright: ignore[reportMissingImports]
-    RequestValidationError,
-)
+from ai.llm_task_queue import LLMTaskQueue
+from ai.task import Task
+from fastapi import FastAPI, Form  # pyright: ignore[reportMissingImports]
+from fastapi.exceptions import RequestValidationError  # pyright: ignore
 from fastapi.requests import Request  # pyright: ignore[reportMissingImports]
-from fastapi.responses import (  # pyright: ignore[reportMissingImports]
-    HTMLResponse,
-    RedirectResponse,
-)
+from fastapi.responses import HTMLResponse  # pyright: ignore[reportMissingImports]
 from logger import get_configured_logger
+from recipe.mealie import send_recipe_to_mealie, set_recipe_thumbnail
 from templates.templates import (
     get_error_page,
     get_exception_page,
     get_homepage,
     get_instagram_error,
     get_status_page,
+    get_success_page,
 )
 from validators.config_validator import validate_mealie_config
 
@@ -47,15 +45,6 @@ MEALIE_BASE_URL = os.getenv("MEALIE_BASE_URL", ".").rstrip("/")
 MEALIE_STATIC_URL = os.getenv("MEALIE_STATIC_URL", MEALIE_BASE_URL).rstrip("/")
 MEALIE_TOKEN = os.getenv("MEALIE_TOKEN")
 MEALIE_URL = f"{MEALIE_BASE_URL}/api/recipes" if MEALIE_BASE_URL else ""
-
-
-def get_thumbnail(metadata: dict) -> str | None:
-    """Get thumbnail from video metadata."""
-    thumbnail_url = metadata.get("thumbnail")
-    if not thumbnail_url:
-        logger.warning("No thumbnail found in metadata")
-        return None
-    return thumbnail_url
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -115,10 +104,19 @@ def submit(
             pattern=r"^https?:\/\/(www\.)?(instagram\.com\/|tiktok\.com\/|youtube\.com\/|facebook\.com\/).+",
         ),
     ],
+    recipeName: Annotated[
+        str,
+        Form(
+            description="Recipe name",
+            example="Chocolate Pancake Recipe",
+            hint="Only letters and spaces, max 100 characters",
+            pattern=r"^[a-zA-Z\s]{1,100}$",
+            min_length=1,
+            max_length=100,
+        ),
+    ],
 ):
-    logger.info(f"Processing new recipe from URL: {url}")
-    # url = _normalize_ig_url(url)
-    # logger.debug(f"Normalized URL: {url}")
+    logger.info(f"Processing new recipe '{recipeName}' from URL: {url}")
 
     task = Task(url=url)
     try:
@@ -129,37 +127,33 @@ def submit(
             logger.error(f"Error fetching metadata: {error}")
             return get_instagram_error(request, str(error))
 
-        caption = metadata.get("description", "")
+        caption: str = metadata.get("description", "")
+        caption = caption.replace("-", " ")
         logger.info(f"Caption length: {len(caption)} characters.")
 
-        logger.debug("Downloading audio...")
-        try:
-            audio = download_audio(url)
-        except InstagramError as error:
-            logger.error(f"Error downloading audio: {error}")
-            return get_instagram_error(request, str(error))
+        # Create initial recipe with just the name and caption
+        initial_description = f"{caption}\n\n[Status: Recipe created - Processing...]"
 
-        logger.debug("Transcribing audio...")
-        task.status = TaskStatus.TRANSCRIBING
-        transcribed_text = transcribe_audio(audio)
-        logger.info(f"Transcription length: {len(transcribed_text)} characters.")
+        recipe_response = send_recipe_to_mealie(recipeName)
 
-        task.status = TaskStatus.GENERATING
-        task.context = TaskContext(
-            caption=caption,
-            transcription=transcribed_text,
-            thumbnail=get_thumbnail(metadata),
-            prompt=create_prompt(caption, transcribed_text),
-        )
-        llm_queue.submit_task(task)
+        thumbnail_url = get_thumbnail(metadata)
+        if thumbnail_url:
+            set_recipe_thumbnail(recipe_response, thumbnail_url)
+
+        task.recipe_slug = recipe_response
+        task.original_caption = caption
+
+        Thread(
+            target=process_audio,
+            daemon=True,
+            args=[url, llm_queue, task, caption, metadata],
+        ).start()
 
         app_state["recipes_processed"] += 1
         app_state["last_error"] = None
 
-        return RedirectResponse(url="/status", status_code=status.HTTP_303_SEE_OTHER)
-        # recipe_url = f"{MEALIE_STATIC_URL}/g/home/r/{result}"
-
-        # return get_success_page(recipe_url, recipe.get("name", "Recipe"), app_state)
+        recipe_url = f"{MEALIE_STATIC_URL}/g/home/r/{recipe_response}"
+        return get_success_page(request, recipe_url, recipeName, app_state)
 
     except subprocess.CalledProcessError as e:
         error_msg = (

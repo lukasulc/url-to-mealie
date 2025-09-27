@@ -6,9 +6,10 @@ import threading
 from typing import Any, Dict, Optional
 
 import requests
+from ai.recipe_parser import naive_parse
 from ai.task import Task, TaskStatus
 from logger import get_configured_logger
-from recipe.mealie import llm_response_to_mealie
+from recipe.mealie import llm_response_to_mealie, update_recipe
 
 logger = get_configured_logger(__name__)
 
@@ -62,12 +63,30 @@ class LLMTaskQueue:
             self.current_task = self.task_queue.get()
 
             try:
+                if self.current_task.recipe_slug and self.current_task.context:
+
+                    # Update recipe with transcription
+                    recipe = {
+                        "description": (
+                            f"{self.current_task.original_caption}\n\n"
+                            "[Status: Transcription successful - Processing with LLM...]"
+                        ),
+                        "recipeIngredient": naive_parse(
+                            self.current_task.context.transcription
+                        ).get("recipeIngredient", []),
+                        "recipeInstructions": naive_parse(
+                            self.current_task.context.transcription
+                        ).get("recipeInstructions", []),
+                    }
+                    update_recipe(self.current_task.recipe_slug, recipe)
+
+                # Process with LLM
                 response = self._process_llm_task(self.current_task)
                 self.current_task.status = TaskStatus.SAVING
                 llm_response_to_mealie(self.current_task, response)
                 self.current_task.status = TaskStatus.COMPLETED
             except Exception as e:
-                logging.error(f"Error processing {self.current_task.url}: {e}")
+                logger.error(f"Error processing {self.current_task.url}: {e}")
                 self.current_task.status = TaskStatus.FAILED
                 self.current_task.error = str(e)
             finally:
@@ -77,6 +96,9 @@ class LLMTaskQueue:
     def _process_llm_task(self, task: Task):
         """Your LLM processing logic"""
         logging.info(f"Starting LLM processing for: {task.url}")
+
+        if not task.context or not task.context.prompt:
+            raise ValueError("Task context or prompt is missing")
 
         messages = [
             {"role": "system", "content": self.system_prompt},
