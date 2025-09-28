@@ -22,7 +22,8 @@ logger = get_configured_logger(__name__)
 MEALIE_BASE_URL = os.getenv("MEALIE_BASE_URL", "").rstrip("/")
 MEALIE_STATIC_URL = os.getenv("MEALIE_STATIC_URL", MEALIE_BASE_URL).rstrip("/")
 MEALIE_TOKEN = os.getenv("MEALIE_TOKEN")
-MEALIE_URL = f"{MEALIE_BASE_URL}/api/recipes" if MEALIE_BASE_URL else ""
+MEALIE_RECIPE_URL = f"{MEALIE_BASE_URL}/api/recipes" if MEALIE_BASE_URL else ""
+CREATE_NEW_FOOD_AND_UNIT = os.getenv("CREATE_NEW_FOOD_AND_UNIT")
 
 
 # Custom exceptions
@@ -148,7 +149,9 @@ def send_recipe_to_mealie(recipe_name: str) -> str:
         "Authorization": f"Bearer {MEALIE_TOKEN}",
         "Content-Type": "application/json",
     }
-    r = requests.post(f"{MEALIE_URL}", headers=headers, json={"name": recipe_name})
+    r = requests.post(
+        f"{MEALIE_RECIPE_URL}", headers=headers, json={"name": recipe_name}
+    )
     r.raise_for_status()
     return r.json()
 
@@ -175,7 +178,9 @@ def set_recipe_thumbnail(slug: str, thumbnail_url: str) -> dict:
         "Authorization": f"Bearer {MEALIE_TOKEN}",
         "Content-Type": "application/json",
     }
-    r = requests.post(f"{MEALIE_URL}/{slug}/image", headers=headers, json=request_body)
+    r = requests.post(
+        f"{MEALIE_RECIPE_URL}/{slug}/image", headers=headers, json=request_body
+    )
     r.raise_for_status()
     return r.json()
 
@@ -197,7 +202,7 @@ def get_recipe(slug: str) -> dict:
         "Authorization": f"Bearer {MEALIE_TOKEN}",
         "Content-Type": "application/json",
     }
-    r = requests.get(f"{MEALIE_URL}/{slug}", headers=headers)
+    r = requests.get(f"{MEALIE_RECIPE_URL}/{slug}", headers=headers)
     r.raise_for_status()
     return r.json()
 
@@ -228,9 +233,59 @@ def update_recipe(slug: str, recipe_updates: dict) -> dict:
         "Authorization": f"Bearer {MEALIE_TOKEN}",
         "Content-Type": "application/json",
     }
-    r = requests.put(f"{MEALIE_URL}/{slug}", headers=headers, json=recipe)
+    r = requests.put(f"{MEALIE_RECIPE_URL}/{slug}", headers=headers, json=recipe)
     r.raise_for_status()
     return r.json()
+
+
+def process_parsed_ingredients(parsed_ingredient: dict):
+    headers = {
+        "Authorization": f"Bearer {MEALIE_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    ingredient = parsed_ingredient["ingredient"]
+    ingredient["note"] = parsed_ingredient["input"]
+    ingredient["display"] = parsed_ingredient["input"]
+    if ingredient["food"] and ingredient["food"]["id"] is None:
+        logger.debug(f"Food not in database: {ingredient}")
+        if CREATE_NEW_FOOD_AND_UNIT:
+            r = requests.post(
+                f"{MEALIE_BASE_URL}/api/foods",
+                headers=headers,
+                json=ingredient["food"],
+            )
+            logger.debug(f"Created new food: {r.json()}")
+            ingredient["food"]["id"] = r.json().get("id")
+        else:
+            del ingredient["food"]
+    if ingredient["unit"] and ingredient["unit"]["id"] is None:
+        logger.debug(f"Unit not in database: {ingredient}")
+        if CREATE_NEW_FOOD_AND_UNIT:
+            r = requests.post(
+                f"{MEALIE_BASE_URL}/api/units",
+                headers=headers,
+                json=ingredient["unit"],
+            )
+            logger.debug(f"Created new unit: {r.json()}")
+            ingredient["unit"]["id"] = r.json().get("id")
+        else:
+            del ingredient["unit"]
+    return ingredient
+
+
+@handle_mealie_errors
+def mealie_parse_ingredients(recipe_ingredients: list[str]) -> list[dict]:
+    headers = {
+        "Authorization": f"Bearer {MEALIE_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    r = requests.post(
+        f"{MEALIE_BASE_URL}/api/parser/ingredients",
+        headers=headers,
+        json={"ingredients": recipe_ingredients},
+    )
+    r.raise_for_status()
+    return list(map(lambda v: process_parsed_ingredients(v), r.json()))
 
 
 @handle_mealie_errors
@@ -260,15 +315,14 @@ def llm_response_to_mealie(task: Task, response: dict[str, Any]) -> None:
         recipe = naive_parse(task.context.transcription)
 
     if not recipe.get("recipeIngredient") and not recipe.get("recipeInstructions"):
-        raise RecipeValidationError(
-            "No ingredients or instructions found in parsed recipe"
-        )
+        logger.warning("No ingredients or instructions found in parsed recipe")
 
     logger.info(
         f"Parsed recipe: {len(recipe.get('recipeIngredient', []))} ingredients, "
         f"{len(recipe.get('recipeInstructions', []))} instructions"
     )
     logger.debug(f"Recipe data: {recipe}")
+    ingredients = mealie_parse_ingredients(recipe.get("recipeIngredient", []))
 
     task.status = TaskStatus.SAVING
     logger.debug("Updating recipe in Mealie")
@@ -276,7 +330,7 @@ def llm_response_to_mealie(task: Task, response: dict[str, Any]) -> None:
     # Update the existing recipe with the new information
     recipe_updates = {
         "orgURL": task.url,
-        "recipeIngredient": recipe.get("recipeIngredient", []),
+        "recipeIngredient": ingredients,
         "recipeInstructions": recipe.get("recipeInstructions", []),
         "description": f"**[ORIGINAL CAPTION]**{task.original_caption}\n\n[Status: Processing completed]",
     }
