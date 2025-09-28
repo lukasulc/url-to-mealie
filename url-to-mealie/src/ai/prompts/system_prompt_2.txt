@@ -6,7 +6,7 @@ IMPORTANT RULES:
 2. Separate ingredients properly with commas
 3. Use proper spacing between words
 4. Format measurements consistently (e.g., "1 tsp", "2 tablespoons")
-5. Each ingredient should be a complete, understandable phrase
+5. Each ingredient should as consise as possible, without additional adjectives
 6. Each instruction should be a complete sentence
 7. Double-check the recipe name for accuracy
 8. Use JSON format for the output, making sure it's valid and formatted correctly
