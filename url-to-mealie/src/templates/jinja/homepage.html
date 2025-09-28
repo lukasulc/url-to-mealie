@@ -31,27 +31,6 @@ platform_badge %} {% block content %}
   <div class="p-4">
     <form method="post" action="/submit" id="recipeForm">
       <div class="mb-3">
-        <label for="recipeName" class="form-label fw-semibold"
-          >Recipe Name</label
-        >
-        <div class="input-group">
-          <span class="input-group-text">
-            <i class="fas fa-utensils text-muted"></i>
-          </span>
-          <input
-            type="text"
-            id="recipeName"
-            name="recipeName"
-            class="form-control"
-            placeholder="Enter recipe name (letters and spaces only)"
-            required
-            autocomplete="off"
-            pattern="[a-zA-Z\s]{1,100}"
-            maxlength="100"
-          />
-        </div>
-      </div>
-      <div class="mb-3">
         <label for="url" class="form-label fw-semibold">Recipe Video URL</label>
         <div class="input-group">
           <span class="input-group-text">
@@ -67,6 +46,27 @@ platform_badge %} {% block content %}
             required
             autocomplete="url"
           />
+        </div>
+        <div class="mb-3">
+          <label for="recipeName" class="form-label fw-semibold"
+            >Recipe Name</label
+          >
+          <div class="input-group">
+            <span class="input-group-text">
+              <i class="fas fa-utensils text-muted"></i>
+            </span>
+            <input
+              type="text"
+              id="recipeName"
+              name="recipeName"
+              class="form-control"
+              placeholder="Enter recipe name (letters and spaces only)"
+              required
+              autocomplete="off"
+              pattern="[a-zA-Z\s]{1,100}"
+              maxlength="100"
+            />
+          </div>
         </div>
 
         <!-- Supported Platforms -->
