@@ -47,6 +47,24 @@ MEALIE_TOKEN = os.getenv("MEALIE_TOKEN")
 MEALIE_URL = f"{MEALIE_BASE_URL}/api/recipes" if MEALIE_BASE_URL else ""
 
 
+@app.get("/check-url")
+async def check_url(url: str):
+    # Check if the URL is in the current task or queue
+    if llm_queue.current_task and llm_queue.current_task.url == url:
+        return {"exists": True, "message": "This URL is currently being processed"}
+
+    # Check the task queue
+    with llm_queue.task_queue.mutex:
+        for task in list(llm_queue.task_queue.queue):
+            if task.url == url:
+                return {
+                    "exists": True,
+                    "message": "This URL is already in the processing queue",
+                }
+
+    return {"exists": False}
+
+
 @app.get("/", response_class=HTMLResponse)
 def form(request: Request):
     return get_homepage(

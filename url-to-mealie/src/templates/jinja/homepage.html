@@ -45,9 +45,39 @@ platform_badge %} {% block content %}
             pattern="^https?:\/\/(www\.)?(instagram\.com\/|tiktok\.com\/|youtube\.com\/|facebook\.com\/).*"
             required
             autocomplete="url"
+            onchange="checkUrlInQueue(this.value)"
           />
         </div>
+        <div id="urlError" class="mt-2 text-danger" style="display: none"></div>
         <div class="mb-3">
+          <script>
+            async function checkUrlInQueue(url) {
+              if (!url) return;
+
+              try {
+                const response = await fetch(
+                  `/check-url?url=${encodeURIComponent(url)}`
+                );
+                const data = await response.json();
+
+                const errorDiv = document.getElementById("urlError");
+                const submitButton = document.querySelector(
+                  'button[type="submit"]'
+                );
+
+                if (data.exists) {
+                  errorDiv.textContent = data.message;
+                  errorDiv.style.display = "block";
+                  submitButton.disabled = true;
+                } else {
+                  errorDiv.style.display = "none";
+                  submitButton.disabled = false;
+                }
+              } catch (error) {
+                console.error("Error checking URL:", error);
+              }
+            }
+          </script>
           <label for="recipeName" class="form-label fw-semibold"
             >Recipe Name</label
           >
