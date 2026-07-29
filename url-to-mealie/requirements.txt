@@ -1,12 +1,13 @@
 # Web framework and server
-fastapi>=0.116.1
-uvicorn>=0.35.0
-python-multipart>=0.0.20
-jinja2>=3.1.6
+fastapi==0.141.1
+uvicorn==0.52.0
+python-multipart==0.0.32
+jinja2==3.1.6
 
 # Video and audio processing
-yt-dlp>=2025.09.05
-faster-whisper>=1.2.0
+yt-dlp==2026.7.4
+faster-whisper==1.2.1
 
 # HTTP client
-requests>=2.32.5
+requests==2.34.2
+debugpy==1.8.21
