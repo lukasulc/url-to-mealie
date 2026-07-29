@@ -14,7 +14,7 @@ RUN apt-get update && apt-get install -y \
 
 
 # Clone the llama.cpp repository directly
-RUN git clone --depth 1 https://github.com/ggml-org/llama.cpp.git . --branch=b6428
+RUN git clone --depth 1 https://github.com/ggml-org/llama.cpp.git . --branch=b10181
 
 
 # Build llama-server binary
