@@ -6,7 +6,6 @@ jinja2==3.1.6
 
 # Video and audio processing
 yt-dlp==2026.7.4
-faster-whisper==1.2.1
 
 # HTTP client
 requests==2.34.2

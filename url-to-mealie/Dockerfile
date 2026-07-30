@@ -1,4 +1,4 @@
-FROM python:3.13-slim
+FROM python:3.14-slim
 
 WORKDIR /app
 COPY requirements.txt .
@@ -26,4 +26,4 @@ RUN mkdir -p /var/log && \
 # Copy application code
 COPY . .
 
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "6999"]
+# Startup command is defined in docker-compose.yaml so service configuration stays in one place.

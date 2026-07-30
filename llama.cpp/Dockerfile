@@ -9,12 +9,14 @@ RUN apt-get update && apt-get install -y \
     ccache \
     cmake \
     git \
+    ca-certificates \
     libcurl4-openssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 
 # Clone the llama.cpp repository directly
-RUN git clone --depth 1 https://github.com/ggml-org/llama.cpp.git . --branch=b10181
+# RUN git clone --depth 1 https://github.com/ggml-org/llama.cpp.git . --branch=b10181
+COPY ./llama.cpp .
 
 
 # Build llama-server binary
@@ -47,7 +49,7 @@ COPY --from=builder /build/build/bin/libggml-base.so /app/libggml-base.so
 RUN mkdir -p /app/models
 
 # Expose port for llama-server HTTP server
-EXPOSE 6998
+EXPOSE ${LLAMA_ARG_PORT}
 
 # Default command runs llama-server with environment variables
 CMD ["./llama-server"]

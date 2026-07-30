@@ -6,37 +6,88 @@ import uuid
 from contextlib import contextmanager
 
 from typing import Optional
-from faster_whisper import WhisperModel  # type: ignore
+
+import requests
 from logger import get_configured_logger
 from ai.task import Task, TaskStatus, TaskContext
 from ai.llm_task_queue import LLMTaskQueue, create_prompt
 
 logger = get_configured_logger(__name__)
 
-_whisper_model = None
+WHISPER_SERVER_URL = os.getenv("WHISPER_SERVER_URL", "http://whisper:6997")
+WHISPER_INFERENCE_PATH = "/inference"
 
 MOBILE_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
 
 
-def get_whisper_model():
-    """Lazy initialization of Whisper model"""
-    global _whisper_model
-    if _whisper_model is None:
-        logger.info("Loading Whisper model...")
-        _whisper_model = WhisperModel("tiny", device="cpu", compute_type="int8")
-        logger.info("Whisper model loaded")
-    return _whisper_model
+class WhisperServerRequestError(Exception):
+    """Custom exception for Whisper server request errors."""
+
+    pass
 
 
 def transcribe_audio(filename: str) -> str:
     try:
-        model = get_whisper_model()
-        segments, _ = model.transcribe(filename)
-        text = " ".join(segment.text for segment in segments)
-        return text
+        response = call_whisper_server(filename)
+        return extract_transcript(response)
     except Exception as e:
         logger.error(f"Error transcribing audio: {e}", exc_info=True)
         raise
+
+
+def call_whisper_server(filename: str) -> dict:
+    """Send an audio file to the containerized whisper.cpp server."""
+    try:
+        with open(filename, "rb") as audio_file:
+            response = requests.post(
+                f"{WHISPER_SERVER_URL}{WHISPER_INFERENCE_PATH}",
+                files={"file": (os.path.basename(filename), audio_file, "audio/mpeg")},
+                data={
+                    "temperature": "0.0",
+                    "temperature_inc": "0.2",
+                    "response_format": "json",
+                },
+                timeout=1800,
+            )
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error calling Whisper server: {e}")
+        raise WhisperServerRequestError(
+            f"Failed to get transcription from Whisper server: {e}"
+        )
+    except json.JSONDecodeError as e:
+        logger.error(f"Invalid JSON response from Whisper server: {e}")
+        raise WhisperServerRequestError(
+            f"Invalid JSON response from Whisper server: {e}"
+        )
+
+
+def extract_transcript(payload: dict) -> str:
+    """Extract the transcript text from the Whisper server response."""
+    if not isinstance(payload, dict):
+        raise WhisperServerRequestError("Unexpected Whisper response format")
+
+    text = payload.get("text")
+    if isinstance(text, str) and text.strip():
+        return text.strip()
+
+    transcription = payload.get("transcription")
+    if isinstance(transcription, str) and transcription.strip():
+        return transcription.strip()
+
+    segments = payload.get("segments")
+    if isinstance(segments, list):
+        texts = []
+        for segment in segments:
+            if isinstance(segment, dict):
+                segment_text = segment.get("text")
+                if isinstance(segment_text, str) and segment_text.strip():
+                    texts.append(segment_text.strip())
+        if texts:
+            return " ".join(texts)
+
+    raise WhisperServerRequestError("Unexpected Whisper response format")
 
 
 def classify_instagram_error(stderr: str) -> str:

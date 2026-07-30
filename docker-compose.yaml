@@ -1,12 +1,36 @@
 services:
+  # llm:
+  #   image: ghcr.io/ggml-org/llama.cpp:server
+  #   # image: amperecomputingai/llama.cpp:latest
+  #   # command: ./llama-server
+  #   ports:
+  #     - "6998:6998"
+  #   volumes:
+  #     - ./models:/app/models
+  #     - llm_logs:/var/log
+  #   env_file: .env
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         memory: 3G
+  #       reservations:
+  #         memory: 2G
+  #   restart: unless-stopped
+  #   logging:
+  #     driver: "json-file"
+  #     options:
+  #       max-size: "10m"
+  #       max-file: "3"
+
+  # TODO: Figure out how to choose between local build and prebuilt image
+  # Uncomment to build the LLM server locally (e.g. for ARM64)
   llm:
-    #   image: ghcr.io/ggml-org/llama.cpp:server
-    image: amperecomputingai/llama.cpp:latest
-    # command: ./llama-server
-    ports:
-      - "6998:6998"
+    build:
+      context: ./llama.cpp
+      network: host
+    image: local-llm-arm64
     volumes:
-      - ./models:/app/models
+      - ./models:/app/models:ro
       - llm_logs:/var/log
     env_file: .env
     deploy:
@@ -21,40 +45,46 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-    networks:
-      - llm-network
-
-  # TODO: Figure out how to choose between local build and prebuilt image
-  # Uncomment to build the LLM server locally (e.g. for ARM64)
-  # llm:
-  #   build: ./llama.cpp
-  #   image: local-llm-arm64
-  #   ports:
-  #     - "6998:6998"
-  #   volumes:
-  #     - ./models:/app/models:ro
-  #     - llm_logs:/var/log
-  #   env_file: .env
-  #   deploy:
-  #     resources:
-  #       limits:
-  #         memory: 2.5G
-  #       reservations:
-  #         memory: 1.5G
-  #   restart: unless-stopped
-  #   logging:
-  #     driver: "json-file"
-  #     options:
-  #       max-size: "10m"
-  #       max-file: "3"
-  #   networks:
-  #     - llm-network
+    network_mode: "host"
+  whisper:
+    build:
+      context: ./whisper.cpp
+      network: host
+    image: local-whisper-arm64
+    deploy:
+      resources:
+        limits:
+          memory: 2.5G
+        reservations:
+          memory: 1.5G
+    command:
+      [
+        "./whisper-server",
+        "-m",
+        "${WHISPER_MODEL_PATH}",
+        "--port",
+        "${WHISPER_PORT}",
+        "--host",
+        "${WHISPER_ARG_HOST}",
+      ]
+    volumes:
+      - ./models:/app/models:ro
+      - whisper_logs:/var/log
+    restart: unless-stopped
+    network_mode: "host"
 
   url-to-mealie:
     build: ./url-to-mealie
     image: url-to-mealie
-    ports:
-      - "8999:6999"
+    command:
+      [
+        "uvicorn",
+        "src.main:app",
+        "--host",
+        "${URL_TO_MEALIE_ARG_HOST}",
+        "--port",
+        "${URL_TO_MEALIE_PORT}",
+      ]
     volumes:
       - /tmp:/tmp
       - recipe_logs:/var/log
@@ -63,37 +93,17 @@ services:
       - MEALIE_TOKEN=${MEALIE_API_KEY}
       - MEALIE_BASE_URL=${MEALIE_BASE_URL}
       - LOG_LEVEL=${LOG_LEVEL}
-      - LLM_SERVER_URL=http://llm:6998
+      - NO_PROXY=localhost,127.0.0.1
+      - no_proxy=localhost,127.0.0.1
     restart: unless-stopped
-    depends_on:
-      - llm
-    networks:
-      - llm-network
-      - mealie_default
-    deploy:
-      resources:
-        limits:
-          memory: 2.5G
-        reservations:
-          memory: 1.5G
-    # healthcheck:
-    #   test: ["CMD", "curl", "-f", "http://localhost:6999/health"]
-    #   interval: 30s
-    #   timeout: 10s
-    #   retries: 3
-    #   start_period: 60s
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
+    network_mode: "host"
 
 volumes:
   recipe_logs:
   llm_logs:
-
-networks:
-  llm-network:
-    driver: bridge
-  mealie_default:
-    external: true
+  whisper_logs:
