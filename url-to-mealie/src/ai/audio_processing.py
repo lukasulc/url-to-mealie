@@ -15,7 +15,7 @@ from ai.llm_task_queue import LLMTaskQueue, create_prompt
 logger = get_configured_logger(__name__)
 
 WHISPER_SERVER_URL = (
-    f"http://{os.getenv('WHISPER_ARG_HOST')}:{os.getenv('WHISPER_ARG_PORT')}"
+    f"http://{os.getenv('WHISPER_ARG_HOST')}:{os.getenv('WHISPER_PORT')}"
 )
 WHISPER_INFERENCE_PATH = "/inference"
 
