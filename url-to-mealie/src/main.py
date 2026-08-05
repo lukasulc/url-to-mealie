@@ -126,7 +126,7 @@ def submit(
         str,
         Form(
             description="Recipe name",
-            example="Chocolate Pancake Recipe",
+            examples=["Chocolate Pancake Recipe"],
             hint="Only letters and spaces, max 100 characters",
             pattern=r"^[a-zA-Z\s]{1,100}$",
             min_length=1,
