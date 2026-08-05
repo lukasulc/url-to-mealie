@@ -14,7 +14,7 @@ from ai.llm_task_queue import LLMTaskQueue, create_prompt
 
 logger = get_configured_logger(__name__)
 
-WHISPER_SERVER_URL = os.getenv("WHISPER_SERVER_URL", "http://whisper:6997")
+WHISPER_SERVER_URL = f"http://{os.getenv('WHISPER_ARG_HOST', 'localhost')}:{os.getenv('WHISPER_ARG_PORT', '6997')}"
 WHISPER_INFERENCE_PATH = "/inference"
 
 MOBILE_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"

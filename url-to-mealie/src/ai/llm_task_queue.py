@@ -13,7 +13,7 @@ from recipe.mealie import llm_response_to_mealie, update_recipe
 
 logger = get_configured_logger(__name__)
 
-LLM_SERVER_URL = os.getenv("LLM_SERVER_URL", "http://llm:6998")
+LLM_SERVER_URL = f"http://{os.getenv('LLAMA_ARG_HOST', 'localhost')}:{os.getenv('LLAMA_ARG_PORT', '6998')}"
 RESPONSE_TIMEOUT = int(os.getenv("LLM_RESPONSE_TIMEOUT", 600))
 
 
