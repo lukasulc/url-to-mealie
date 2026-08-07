@@ -1,55 +1,67 @@
-# Use Ubuntu 22.04 base image with multi-stage build
-FROM ubuntu:22.04 AS builder
+ARG LLAMA_CUDA=off
+ARG UBUNTU_VERSION=22.04
+ARG CUDA_VERSION=13.3.1
 
+FROM docker.io/nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION} AS builder
+
+ARG LLAMA_CUDA
 WORKDIR /build
 
-# Install build dependencies
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    ccache \
-    cmake \
-    git \
-    ca-certificates \
-    libcurl4-openssl-dev \
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      build-essential \
+      cmake \
+      git \
+      python3 \
+      ca-certificates \
+      libcurl4-openssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-
-# Clone the llama.cpp repository directly
-# RUN git clone --depth 1 https://github.com/ggml-org/llama.cpp.git . --branch=b10181
 COPY ./llama.cpp .
 
+RUN if [ "${LLAMA_CUDA}" = "on" ]; then \
+      cmake -B build \
+        -DLLAMA_BUILD_SERVER=ON \
+        -DLLAMA_BUILD_UI=OFF \
+        -DLLAMA_BUILD_TESTS=OFF \
+        -DLLAMA_BUILD_EXAMPLES=OFF \
+        -DLLAMA_BUILD_TOOLS=OFF \
+        -DLLAMA_BUILD_APP=OFF \
+        -DLLAMA_OPENSSL=OFF \
+        -DLLAMA_BUILD_COMMON=ON \
+        -DGGML_NATIVE=ON \
+        -DGGML_CUDA=ON \
+        -DCMAKE_BUILD_TYPE=Release . ; \
+    else \
+      cmake -B build \
+        -DLLAMA_BUILD_SERVER=ON \
+        -DLLAMA_BUILD_UI=OFF \
+        -DLLAMA_BUILD_TESTS=OFF \
+        -DLLAMA_BUILD_EXAMPLES=OFF \
+        -DLLAMA_BUILD_TOOLS=OFF \
+        -DLLAMA_BUILD_APP=OFF \
+        -DLLAMA_OPENSSL=OFF \
+        -DLLAMA_BUILD_COMMON=ON \
+        -DGGML_NATIVE=ON \
+        -DCMAKE_BUILD_TYPE=Release . ; \
+    fi
 
-# Build llama-server binary
-RUN cmake -B build -DLLAMA_STATIC=ON
-RUN cmake --build build --config Release -j$(nproc)
+RUN cmake --build build --config Release -j2
 
-# Runtime stage
-FROM ubuntu:22.04
+FROM docker.io/nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu${UBUNTU_VERSION} AS runtime
 
 WORKDIR /app
 
-# Install runtime dependencies only
-RUN apt-get update && apt-get install -y \
-    libcurl4 \
-    libtbb12 \
-    libgomp1 \
-    ca-certificates \
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /build/build/bin/ /app/
+COPY --from=builder /build/build/bin/llama-server /app/llama-server
+COPY --from=builder /build/build/bin/lib* /app/
 
-COPY --from=builder /build/build/bin/libllama.so /app/libllama.so
-COPY --from=builder /build/build/bin/libggml.so /app/libggml.so
-COPY --from=builder /build/build/bin/libmtmd.so /app/libmtmd.so
-COPY --from=builder /build/build/bin/libggml-cpu.so /app/libggml-cpu.so
-COPY --from=builder /build/build/bin/libggml-base.so /app/libggml-base.so
-
-
-# Create directory for models
 RUN mkdir -p /app/models
 
-# Expose port for llama-server HTTP server
 EXPOSE ${LLAMA_ARG_PORT}
 
-# Default command runs llama-server with environment variables
 CMD ["./llama-server"]

@@ -1,10 +1,7 @@
 services:
   llm:
-    build:
-      context: ./llama.cpp
-      args:
-        - LLAMA_CUDA=${LLAMA_CUDA:-off}
-    image: local-llm
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda13
+    runtime: nvidia
     ports:
       - "${LLAMA_ARG_PORT}:${LLAMA_ARG_PORT}"
     volumes:
@@ -14,34 +11,38 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2.5G
+          memory: 8G
         reservations:
-          memory: 1.5G
+          memory: 2G
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
     restart: unless-stopped
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
-    network_mode: ${NETWORK_MODE:-bridge}
+    networks:
+      - llm-network
 
   whisper:
-    build:
-      context: ./whisper.cpp
-      args:
-        - WHISPER_CUDA=${WHISPER_CUDA:-off}
-    image: local-whisper
+    image: ghcr.io/ggml-org/whisper.cpp:main-cuda
+    runtime: nvidia
     ports:
-      - "${WHISPER_PORT}:${WHISPER_PORT}" # Update to match your whisper port variable if different
+      - "${WHISPER_PORT}:${WHISPER_PORT}"
+    entrypoint: /app/build/bin/whisper-server
     deploy:
       resources:
         limits:
-          memory: 2.5G
+          memory: 8G
         reservations:
-          memory: 1.5G
+          memory: 2G
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
     command:
       [
-        "./whisper-server",
         "-m",
         "${WHISPER_MODEL_PATH}",
         "--port",
@@ -53,7 +54,8 @@ services:
       - ./models:/app/models:ro
       - whisper_logs:/var/log
     restart: unless-stopped
-    network_mode: ${NETWORK_MODE:-bridge}
+    networks:
+      - whisper-network
 
   url-to-mealie:
     build: ./url-to-mealie
@@ -77,11 +79,9 @@ services:
       - MEALIE_TOKEN=${MEALIE_API_KEY}
       - MEALIE_BASE_URL=${MEALIE_BASE_URL}
       - LOG_LEVEL=${LOG_LEVEL}
-      - NO_PROXY=localhost,127.0.0.1
-      - no_proxy=localhost,127.0.0.1
-      - LLAMA_ARG_HOST=${LLAMA_ARG_HOST:-llm}
+      - LLAMA_ARG_HOST=llm
       - LLAMA_ARG_PORT=${LLAMA_ARG_PORT}
-      - WHISPER_ARG_HOST=${WHISPER_ARG_HOST:-whisper}
+      - WHISPER_ARG_HOST=whisper
       - WHISPER_PORT=${WHISPER_PORT}
     restart: unless-stopped
     logging:
@@ -89,7 +89,15 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-    network_mode: ${NETWORK_MODE:-bridge}
+    networks:
+      - llm-network
+      - whisper-network
+
+networks:
+  llm-network:
+    driver: bridge
+  whisper-network:
+    driver: bridge
 
 volumes:
   recipe_logs:
