@@ -12,51 +12,46 @@ This application extracts recipe information from Social Media videos using audi
 
 2. Project architecture and models
 
-   The LLM is now provided as a separate service (llama.cpp server). This repository contains two main services:
-
+   The model servers are provided as separate services. This repository contains the application plus an optional model stack:
    - `llm` (optional): builds and runs the llama.cpp HTTP server (see `./llama.cpp`)
+   - `whisper` (optional): builds and runs the whisper.cpp HTTP server (see `./whisper.cpp`)
    - `url-to-mealie`: the recipe parser web app (this folder)
 
    Models should live in the top-level `models/` directory (shared volume).
 
-   The `llm` service mounts `./models` into the container at `/app/models` (read-only). Update `docker-compose.yaml` if you want a different path or filename.
+   The model services mount `./models` into their containers at `/app/models` (read-only).
 
 3. Environment variables
 
    Required (for the parser):
-
    - `MEALIE_BASE_URL`: Your Mealie instance URL (e.g., "http://localhost:9000")
    - `MEALIE_TOKEN`: Your Mealie API token
 
-   Parser-specific optional:
-
-   - `LLM_SERVER_URL`: URL of the llama.cpp HTTP server (default: `http://llm:6998` when using docker-compose)
-
-   LLM service (if you run it via `docker-compose`):
-
-   - `PORT` (default `6998`)
-   - `MODEL_PATH` (set in `docker-compose.yaml` environment or point to the model file inside `/app/models`)
+   The application connects to the Docker service names `http://llm` and `http://whisper` on the internal container network. Their host-facing ports are configured only in `docker-compose.models.yaml`.
 
 4. Running the project with Docker (recommended)
 
-   The repository includes a `docker-compose.yaml` which defines two services: `llm` and `url-to-mealie`.
-
-   - If you want the stack fully self-contained, leave `llm` enabled. It will build the server from `./llama.cpp` and serve the model from the shared `models/` volume.
-   - If you already run a llama.cpp server elsewhere, you can comment out or remove the `llm` service and set `LLM_SERVER_URL` in the parser `.env` (or export it) to point to your existing server.
-
-   Example: bring up both services locally
+   The model and application stacks share the external Docker network named `url-to-mealie`. Create it once before starting either stack:
 
    ```bash
-   docker-compose up --build
+   docker network create ${DOCKER_NETWORK_NAME:-url-to-mealie}
    ```
 
-   Example: use your own LLM server and only run the parser
+   If you use a different network name, set `DOCKER_NETWORK_NAME` for both Compose commands.
+
+   Start the model services:
 
    ```bash
-   # comment out llm service in docker-compose.yaml
-   export LLM_SERVER_URL=http://your-llm-host:6998
-   docker-compose up --build url-to-mealie
+   docker compose -f docker-compose.models.yaml up --build
    ```
+
+   Start the application in a second terminal:
+
+   ```bash
+   docker compose -f docker-compose.yaml up --build
+   ```
+
+   To change ports exposed on the host, set `LLAMA_HOST_PORT` or `WHISPER_HOST_PORT` when starting `docker-compose.models.yaml`. The application does not need to change because it uses the internal service names on port 80.
 
 ## Features
 

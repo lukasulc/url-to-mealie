@@ -1,60 +1,4 @@
 services:
-  llm:
-    build:
-      context: ./llama.cpp
-      args:
-        - LLAMA_CUDA=${LLAMA_CUDA:-off}
-    image: local-llm
-    ports:
-      - "${LLAMA_ARG_PORT}:${LLAMA_ARG_PORT}"
-    volumes:
-      - ./models:/app/models:ro
-      - llm_logs:/var/log
-    env_file: .env
-    deploy:
-      resources:
-        limits:
-          memory: 2.5G
-        reservations:
-          memory: 1.5G
-    restart: unless-stopped
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-    network_mode: ${NETWORK_MODE:-bridge}
-
-  whisper:
-    build:
-      context: ./whisper.cpp
-      args:
-        - WHISPER_CUDA=${WHISPER_CUDA:-off}
-    image: local-whisper
-    ports:
-      - "${WHISPER_PORT}:${WHISPER_PORT}" # Update to match your whisper port variable if different
-    deploy:
-      resources:
-        limits:
-          memory: 2.5G
-        reservations:
-          memory: 1.5G
-    command:
-      [
-        "./whisper-server",
-        "-m",
-        "${WHISPER_MODEL_PATH}",
-        "--port",
-        "${WHISPER_PORT}",
-        "--host",
-        "${WHISPER_ARG_HOST}",
-      ]
-    volumes:
-      - ./models:/app/models:ro
-      - whisper_logs:/var/log
-    restart: unless-stopped
-    network_mode: ${NETWORK_MODE:-bridge}
-
   url-to-mealie:
     build: ./url-to-mealie
     image: url-to-mealie
@@ -72,26 +16,32 @@ services:
     volumes:
       - /tmp:/tmp
       - recipe_logs:/var/log
-    env_file: .env
     environment:
       - MEALIE_TOKEN=${MEALIE_API_KEY}
       - MEALIE_BASE_URL=${MEALIE_BASE_URL}
+      - MEALIE_STATIC_URL=${MEALIE_STATIC_URL}
       - LOG_LEVEL=${LOG_LEVEL}
+      - LLM_RESPONSE_TIMEOUT=${LLM_RESPONSE_TIMEOUT:-600}
+      - REQUEST_TIMEOUT=${REQUEST_TIMEOUT:-30}
+      - IG_COOKIES_NETSCAPE=${IG_COOKIES_NETSCAPE:-}
+      - IG_SESSIONID=${IG_SESSIONID:-}
+      - IG_CSRFTOKEN=${IG_CSRFTOKEN:-}
+      - IG_COOKIE_STRING=${IG_COOKIE_STRING:-}
       - NO_PROXY=localhost,127.0.0.1
       - no_proxy=localhost,127.0.0.1
-      - LLAMA_ARG_HOST=${LLAMA_ARG_HOST:-llm}
-      - LLAMA_ARG_PORT=${LLAMA_ARG_PORT}
-      - WHISPER_ARG_HOST=${WHISPER_ARG_HOST:-whisper}
-      - WHISPER_PORT=${WHISPER_PORT}
     restart: unless-stopped
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
-    network_mode: ${NETWORK_MODE:-bridge}
+    networks:
+      - url-to-mealie
+
+networks:
+  url-to-mealie:
+    name: ${DOCKER_NETWORK_NAME:-url-to-mealie}
+    external: true
 
 volumes:
   recipe_logs:
-  llm_logs:
-  whisper_logs:
