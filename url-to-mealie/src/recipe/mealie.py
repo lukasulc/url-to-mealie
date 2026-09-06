@@ -1,5 +1,6 @@
 import os
-from functools import wraps
+import re
+from functools import lru_cache, wraps
 from typing import Any, Callable, TypeVar
 from urllib.parse import urlparse
 
@@ -23,7 +24,6 @@ MEALIE_BASE_URL = os.getenv("MEALIE_BASE_URL", "").rstrip("/")
 MEALIE_STATIC_URL = os.getenv("MEALIE_STATIC_URL", MEALIE_BASE_URL).rstrip("/")
 MEALIE_TOKEN = os.getenv("MEALIE_TOKEN")
 MEALIE_RECIPE_URL = f"{MEALIE_BASE_URL}/api/recipes" if MEALIE_BASE_URL else ""
-CREATE_NEW_FOOD_AND_UNIT = os.getenv("CREATE_NEW_FOOD_AND_UNIT")
 
 
 # Custom exceptions
@@ -238,6 +238,77 @@ def update_recipe(slug: str, recipe_updates: dict) -> dict:
     return r.json()
 
 
+def _normalize_name(value: str | None) -> str:
+    if not value:
+        return ""
+    return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+
+
+def _matches_existing_item(
+    candidate_name: str | None, existing_name: str | None
+) -> bool:
+    normalized_candidate = _normalize_name(candidate_name)
+    normalized_existing = _normalize_name(existing_name)
+
+    if not normalized_candidate or not normalized_existing:
+        return False
+    if normalized_candidate == normalized_existing:
+        return True
+    if (
+        normalized_candidate in normalized_existing
+        or normalized_existing in normalized_candidate
+    ):
+        return True
+
+    candidate_tokens = set(normalized_candidate.split())
+    existing_tokens = set(normalized_existing.split())
+    return bool(candidate_tokens & existing_tokens)
+
+
+@lru_cache(maxsize=16)
+def _get_existing_mealie_items(
+    item_type: str, base_url: str, token: str | None
+) -> list[dict[str, Any]]:
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+    url = f"{base_url}/api/{item_type}"
+
+    try:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        payload = response.json()
+    except Exception as exc:
+        logger.debug(f"Unable to load existing Mealie {item_type}: {exc}")
+        return []
+
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    if isinstance(payload, dict):
+        for key in ("items", "results", "data"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                return [item for item in value if isinstance(item, dict)]
+    return []
+
+
+def _match_existing_item(
+    item_type: str, candidate_name: str | None
+) -> dict[str, Any] | None:
+    if not candidate_name:
+        return None
+
+    existing_items = _get_existing_mealie_items(
+        item_type, MEALIE_BASE_URL, MEALIE_TOKEN
+    )
+    for item in existing_items:
+        item_name = item.get("name") or item.get("display_name") or item.get("title")
+        if _matches_existing_item(candidate_name, item_name):
+            return {"id": item.get("id"), "name": item_name}
+    return None
+
+
 def process_parsed_ingredients(parsed_ingredient: dict):
     headers = {
         "Authorization": f"Bearer {MEALIE_TOKEN}",
@@ -246,30 +317,27 @@ def process_parsed_ingredients(parsed_ingredient: dict):
     ingredient = parsed_ingredient["ingredient"]
     ingredient["note"] = parsed_ingredient["input"]
     ingredient["display"] = parsed_ingredient["input"]
-    if ingredient["food"] and ingredient["food"]["id"] is None:
-        logger.debug(f"Food not in database: {ingredient}")
-        if CREATE_NEW_FOOD_AND_UNIT:
-            r = requests.post(
-                f"{MEALIE_BASE_URL}/api/foods",
-                headers=headers,
-                json=ingredient["food"],
-            )
-            logger.debug(f"Created new food: {r.json()}")
-            ingredient["food"]["id"] = r.json().get("id")
+
+    food = ingredient.get("food")
+    if food and food.get("id") is None:
+        logger.debug(f"Attempting to match existing food for: {ingredient}")
+        matched_food = _match_existing_item("foods", food.get("name"))
+        if matched_food:
+            ingredient["food"] = matched_food
         else:
+            logger.debug("No matching food found; removing food from ingredient")
             del ingredient["food"]
-    if ingredient["unit"] and ingredient["unit"]["id"] is None:
-        logger.debug(f"Unit not in database: {ingredient}")
-        if CREATE_NEW_FOOD_AND_UNIT:
-            r = requests.post(
-                f"{MEALIE_BASE_URL}/api/units",
-                headers=headers,
-                json=ingredient["unit"],
-            )
-            logger.debug(f"Created new unit: {r.json()}")
-            ingredient["unit"]["id"] = r.json().get("id")
+
+    unit = ingredient.get("unit")
+    if unit and unit.get("id") is None:
+        logger.debug(f"Attempting to match existing unit for: {ingredient}")
+        matched_unit = _match_existing_item("units", unit.get("name"))
+        if matched_unit:
+            ingredient["unit"] = matched_unit
         else:
+            logger.debug("No matching unit found; removing unit from ingredient")
             del ingredient["unit"]
+
     return ingredient
 
 
